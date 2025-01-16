@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-
-	"gorm.io/gorm"
 )
 
 type ApiHandler func(ctx *Context)

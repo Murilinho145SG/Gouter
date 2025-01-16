@@ -1,7 +1,6 @@
 package router
 
 import (
-	"auth/database"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 type ApiHandler func(ctx *Context)
 
 type Context struct {
-	DB    *gorm.DB
 	R     *http.Request
 	W     http.ResponseWriter
 	Route string
@@ -40,7 +38,6 @@ func (c *Context) WriteStatus(status int) {
 
 func NewContext(r *http.Request, w http.ResponseWriter, route string) *Context {
 	return &Context{
-		DB:    database.DB,
 		R:     r,
 		W:     w,
 		Route: route,

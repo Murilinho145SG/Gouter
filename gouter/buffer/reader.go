@@ -3,8 +3,6 @@ package buffer
 import (
 	"errors"
 	"io"
-
-	"github.com/Murilinho145SG/gouter/gouter/log"
 )
 
 type BuffReader struct {
@@ -62,7 +60,6 @@ func (br *BuffReader) Read() ([]byte, error) {
 			total_read += n
 			bytes_read = append(bytes_read, bytes[:n]...)
 			if total_read == br.Len {
-				log.Info("Segunda condição: " + string(bytes_read))
 				return bytes_read, nil
 			}
 		}

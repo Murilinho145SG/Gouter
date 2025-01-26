@@ -18,17 +18,21 @@ var (
 	ErrInvalidHeader = errors.New("invalid header in request")
 )
 
+type Params map[string]string
+
 type Request struct {
 	Method  string
 	Path    string
 	Headers Headers
 	Version string
 	Body    buffer.BuffReader
+	Params  Params
 }
 
 func NewRequest() *Request {
 	return &Request{
 		Headers: make(Headers),
+		Params:  make(Params),
 	}
 }
 
@@ -57,7 +61,7 @@ func (r *Request) Parser(headersByte []byte) error {
 	titleParts := strings.Split(lines[0], " ")
 	if len(titleParts) > 0 && len(titleParts) == 3 {
 		r.Method = titleParts[0]
-		r.Path = titleParts[1]
+		r.Path = strings.TrimSpace(titleParts[1])
 		r.Version = titleParts[2]
 	}
 
@@ -68,11 +72,52 @@ func (r *Request) Parser(headersByte []byte) error {
 		if len(parts) == 2 {
 			key := parts[0]
 			value := parts[1]
-			r.Headers.Add(key, value)
+			valueTrim, found := strings.CutPrefix(value, " ")
+			if !found {
+				r.Headers.Add(key, value)
+				continue
+			}
+			
+			r.Headers.Add(key, valueTrim)
 		} else {
 			return ErrInvalidHeader
 		}
 	}
+
+	return nil
+}
+
+func (p Params) Add(key, value string) error {
+	_, err := p.Get(key)
+	if err == nil {
+		return ErrAlreadyExists
+	}
+
+	p[key] = value
+
+	return nil
+}
+
+func (p Params) Get(key string) (string, error) {
+	value := p[key]
+	if value == "" {
+		return "", ErrNotExist
+	}
+
+	return value, nil
+}
+
+func (p Params) Set(key, value string) {
+	p[key] = value
+}
+
+func (p Params) Del(key string) error {
+	_, err := p.Get(key)
+	if err != nil {
+		return err
+	}
+
+	delete(p, key)
 
 	return nil
 }

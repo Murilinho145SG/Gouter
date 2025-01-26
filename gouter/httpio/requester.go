@@ -3,7 +3,10 @@ package httpio
 import (
 	"errors"
 	"io"
+	"strconv"
 	"strings"
+
+	"github.com/Murilinho145SG/gouter/gouter/buffer"
 )
 
 type Headers map[string]string
@@ -20,7 +23,7 @@ type Request struct {
 	Path    string
 	Headers Headers
 	Version string
-	Body    io.Reader
+	Body    buffer.BuffReader
 }
 
 func NewRequest() *Request {
@@ -30,7 +33,22 @@ func NewRequest() *Request {
 }
 
 func (r *Request) SetBody(body io.Reader) {
-	r.Body = body
+	if body == nil {
+		return
+	}
+
+	lengthStr, err := r.Headers.Get("Content-Length")
+	var length int
+	if err == nil {
+		var err error
+		length, err = strconv.Atoi(strings.TrimSpace(lengthStr))
+		if err != nil {
+			length = 0
+		}
+	}
+
+	br := buffer.NewBuffReader(body, length)
+	r.Body = br
 }
 
 func (r *Request) Parser(headersByte []byte) error {

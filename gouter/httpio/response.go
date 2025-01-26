@@ -6,9 +6,8 @@ type Response struct {
 	Headers
 }
 
-func NewResponse(code uint) Response {
+func NewResponse() Response {
 	return Response{
-		Code:    code,
 		Headers: make(Headers),
 	}
 }

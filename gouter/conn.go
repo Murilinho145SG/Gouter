@@ -35,11 +35,14 @@ var DefaultBuffer = 8192
 func handleConn(conn net.Conn, router *Router, server ...Server) {
 	defer conn.Close()
 	req := parseConn(conn, server...)
-	response := httpio.NewResponse(404)
-	writer := httpio.NewWriter(conn, &response)	
-	ctx := router.Routes[req.Path]
-	if ctx != nil {
-		ctx(writer, req)
+	response := httpio.NewResponse()
+	writer := httpio.NewWriter(conn, &response)
+	handler := router.Routes[req.Path]
+	if handler != nil {
+		handler(writer, req)
+	} else {
+		conn.Write([]byte("HTTP/1.1 404\r\n\r\n"))
+		return
 	}
 
 	statusLine := fmt.Sprintf("HTTP/1.1 %d\r\n", response.Code)
@@ -47,11 +50,15 @@ func handleConn(conn net.Conn, router *Router, server ...Server) {
 	for k, v := range response.Headers {
 		headers += fmt.Sprintf("%s: %s\r\n", k, v)
 	}
-	if len(response.Body) > 0 && statusLine == "404" {
+
+	if len(response.Body) > 0 && response.Code == 0 {
 		statusLine = fmt.Sprintf("HTTP/1.1 %d\r\n", 200)
 	}
+
 	resStr := fmt.Sprintf("%s%s\r\n%s", statusLine, headers, string(response.Body))
 	conn.Write([]byte(resStr))
+
+	return
 }
 
 func parseConn(conn net.Conn, server ...Server) *httpio.Request {

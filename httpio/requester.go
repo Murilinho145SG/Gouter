@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Murilinho145SG/gouter/gouter/buffer"
+	"github.com/Murilinho145SG/gouter/buffer"
 )
 
 type Headers map[string]string

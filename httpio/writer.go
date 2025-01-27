@@ -3,7 +3,7 @@ package httpio
 import (
 	"encoding/json"
 
-	"github.com/Murilinho145SG/gouter/gouter/log"
+	"github.com/Murilinho145SG/gouter/log"
 )
 
 type Writer struct {

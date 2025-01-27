@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/Murilinho145SG/gouter/gouter/log"
+	"github.com/Murilinho145SG/gouter/log"
 )
 
 type Response struct {

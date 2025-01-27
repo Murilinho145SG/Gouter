@@ -2,14 +2,16 @@ package gouter
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"strings"
+	"time"
 
-	"github.com/Murilinho145SG/gouter/gouter/httpio"
-	"github.com/Murilinho145SG/gouter/gouter/log"
+	"github.com/Murilinho145SG/gouter/httpio"
+	"github.com/Murilinho145SG/gouter/log"
 )
 
 type Server struct {
@@ -150,7 +152,11 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 	req := httpio.NewRequest()
 	if serverConfig.InitialReadChunk {
 		var read_bytes []byte
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		for {
+			deadline, _ := ctx.Deadline()
+			conn.SetReadDeadline(deadline)
 			n, err := conn.Read(buffer)
 			if err != nil {
 				if err == io.EOF {
@@ -179,6 +185,11 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 					req.SetBody(bodyReader)
 					break
 				}
+			}
+
+			select {
+			case <-ctx.Done():
+				return nil
 			}
 		}
 	} else {

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/Murilinho145SG/gouter/gouter"
-	"github.com/Murilinho145SG/gouter/gouter/httpio"
+	"github.com/Murilinho145SG/gouter"
+	"github.com/Murilinho145SG/gouter/httpio"
 )
 
 func main() {

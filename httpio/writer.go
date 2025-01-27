@@ -2,20 +2,17 @@ package httpio
 
 import (
 	"encoding/json"
-	"net"
 
 	"github.com/Murilinho145SG/gouter/gouter/log"
 )
 
 type Writer struct {
-	stream   net.Conn
 	response *Response
 	Headers
 }
 
-func NewWriter(stream net.Conn, response *Response) Writer {
+func NewWriter(response *Response) Writer {
 	return Writer{
-		stream:   stream,
 		response: response,
 		Headers:  make(Headers),
 	}
@@ -31,6 +28,9 @@ func (w *Writer) WriteHeader(statusCode uint) {
 }
 
 func (w *Writer) Write(value []byte) {
+	if w.response.Code == 0 {
+		w.WriteHeader(200)
+	}
 	w.response.Body = append(w.response.Body, value...)
 }
 

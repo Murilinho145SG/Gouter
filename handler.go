@@ -1,8 +1,11 @@
 package gouter
 
 import (
+	"os"
+
 	"github.com/Murilinho145SG/gouter/gouter/httpio"
 	"github.com/Murilinho145SG/gouter/gouter/log"
+	"github.com/Murilinho145SG/gouter/tester"
 )
 
 type Handler func(w httpio.Writer, r *httpio.Request)
@@ -13,15 +16,19 @@ type Router struct {
 	DebugMode bool
 }
 
-func NewRouter() *Router {
+func NewRouter(debug bool) *Router {
+	if debug {
+		err := tester.StartTest()
+		if err != nil {
+			log.Error("Error when testing the application")
+			os.Exit(1)
+		}
+	}
+
 	return &Router{
 		Routes:    make(HandlersList),
-		DebugMode: false,
+		DebugMode: debug,
 	}
-}
-
-func (r *Router) SetDebugMode() {
-	r.DebugMode = true
 }
 
 func (r *Router) Route(route string, handler Handler) {

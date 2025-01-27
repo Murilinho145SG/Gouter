@@ -77,7 +77,7 @@ func (r *Request) Parser(headersByte []byte) error {
 				r.Headers.Add(key, value)
 				continue
 			}
-			
+
 			r.Headers.Add(key, valueTrim)
 		} else {
 			return ErrInvalidHeader

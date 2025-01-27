@@ -7,7 +7,7 @@ import (
 
 type BuffReader struct {
 	Reader io.Reader
-	Chunk  int
+	chunk  int
 	Len    int
 }
 
@@ -24,7 +24,7 @@ func NewBuffReader(reader io.Reader, len int) BuffReader {
 }
 
 func (br *BuffReader) SetChunk(chunk int) {
-	br.Chunk = chunk
+	br.chunk = chunk
 }
 
 func (br *BuffReader) Read() ([]byte, error) {
@@ -32,7 +32,7 @@ func (br *BuffReader) Read() ([]byte, error) {
 		return nil, ErrReaderIsNil
 	}
 
-	if br.Chunk == 0 {
+	if br.chunk == 0 {
 		if br.Len == 0 {
 			return nil, ErrNotHaveLen
 		}
@@ -48,7 +48,7 @@ func (br *BuffReader) Read() ([]byte, error) {
 			return nil, ErrNotHaveLen
 		}
 
-		bytes := make([]byte, br.Chunk)
+		bytes := make([]byte, br.chunk)
 		var bytes_read []byte
 		total_read := 0
 		for {

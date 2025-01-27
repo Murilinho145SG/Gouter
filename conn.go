@@ -55,7 +55,7 @@ func RunTLS(addrs string, router *Router, certStr, key string, server ...Server)
 		}
 
 		tlsConn := tls.Server(conn, config)
-		
+
 		go handleConn(tlsConn, router, server...)
 	}
 }
@@ -109,8 +109,8 @@ func handleConn(conn net.Conn, router *Router, server ...Server) {
 	if router.DebugMode {
 		log.Debug(conn.RemoteAddr().String(), "is connecting at", req.Path)
 	}
-	response := httpio.NewResponse()
-	writer := httpio.NewWriter(conn, &response)
+	response := httpio.NewResponse(conn)
+	writer := httpio.NewWriter(&response)
 	originalRoute := parseRoute(router.Routes, req)
 	var handler Handler
 	if originalRoute != "" {
@@ -126,19 +126,11 @@ func handleConn(conn net.Conn, router *Router, server ...Server) {
 		return
 	}
 
-	statusLine := fmt.Sprintf("HTTP/1.1 %d\r\n", response.Code)
-	headers := ""
-	for k, v := range response.Headers {
-		headers += fmt.Sprintf("%s: %s\r\n", k, v)
+	err := response.Write()
+	if err != nil {
+		log.Error(err)
+		return
 	}
-
-	if len(response.Body) > 0 && response.Code == 0 {
-		statusLine = fmt.Sprintf("HTTP/1.1 %d\r\n", 200)
-	}
-
-	resStr := fmt.Sprintf("%s%s\r\n%s", statusLine, headers, string(response.Body))
-	conn.Write([]byte(resStr))
-
 	return
 }
 

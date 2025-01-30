@@ -70,10 +70,10 @@ func (br *BuffReader) SetMaxSize(size int) {
 //
 // It first checks if the BuffReader instance is valid before proceeding.
 // If the buffer size exceeds the maximum allowed limit, an error is returned.
-// The data is read in chunks to ensure efficient reading while adhering to 
+// The data is read in chunks to ensure efficient reading while adhering to
 // predefined constraints.
 //
-// If an error occurs during reading, it may return io.ErrUnexpectedEOF if 
+// If an error occurs during reading, it may return io.ErrUnexpectedEOF if
 // the end of the file is reached before the expected amount of data is read.
 func (br *BuffReader) Read() ([]byte, error) {
 	// Checks if the BuffReader instance is nil and returns an error if so.
@@ -121,8 +121,6 @@ func (br *BuffReader) Read() ([]byte, error) {
 	// Returns the successfully read data.
 	return buf, nil
 }
-
-
 
 // func (br *BuffReader) SetMaxSize(size int) {
 // 	br.maxSize = size

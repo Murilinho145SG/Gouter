@@ -49,9 +49,9 @@ func RunTLS(addrs string, router *Router, certStr, key string, server ...Server)
 
 	// Configure TLS settings
 	config := &tls.Config{
-		Certificates:             []tls.Certificate{cert}, // Server certificate
-		MinVersion:               tls.VersionTLS12,        // Minimum TLS version
-		PreferServerCipherSuites: true,                    // Prefer server cipher suites
+		Certificates:             []tls.Certificate{cert},                  // Server certificate
+		MinVersion:               tls.VersionTLS12,                         // Minimum TLS version
+		PreferServerCipherSuites: true,                                     // Prefer server cipher suites
 		CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519}, // Preferred elliptic curves
 	}
 

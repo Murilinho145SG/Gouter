@@ -11,10 +11,10 @@ import (
 
 // Response represents an HTTP response, containing a status code, body, headers, and a network connection.
 type Response struct {
-	Code    uint      // HTTP status code (e.g., 200, 404)
-	Body    []byte    // Response body
-	Headers Headers   // Response headers
-	conn    net.Conn  // Network connection to send the response
+	Code    uint     // HTTP status code (e.g., 200, 404)
+	Body    []byte   // Response body
+	Headers Headers  // Response headers
+	conn    net.Conn // Network connection to send the response
 }
 
 // NewResponse creates and returns a new instance of Response with initialized headers and the provided network connection.

@@ -13,9 +13,12 @@ func defaultArgs(prefix string, skip int) string {
 	_, filePath, line, ok := runtime.Caller(skip)
 	if !ok {
 		Error("for execute Info!")
+		skip -= 1
+		return defaultArgs(prefix, skip)
 	}
-	lineStr := strconv.Itoa(line)
+
 	file := filepath.Base(filePath)
+	lineStr := strconv.Itoa(line)
 	return prefix + " \033[35m" + file + ":" + lineStr + ":\033[0m"
 }
 
@@ -70,10 +73,16 @@ func WarnSkip(skip int, args ...any) {
 	print(append([]any{defaultArgs("\033[33m[Warn]", skip+2)}, args...)...)
 }
 
+var DebugMode = false
+
 func Debug(args ...any) {
-	print(append([]any{defaultArgs("\033[94m[Debug]", 2)}, args...)...)
+	if DebugMode {
+		print(append([]any{defaultArgs("\033[94m[Debug]", 2)}, args...)...)
+	}
 }
 
 func DebugSkip(skip int, args ...any) {
-	print(append([]any{defaultArgs("\033[94m[Debug]", skip+2)}, args...)...)
+	if DebugMode {
+		print(append([]any{defaultArgs("\033[94m[Debug]", skip+2)}, args...)...)
+	}
 }

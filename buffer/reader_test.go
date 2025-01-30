@@ -14,7 +14,10 @@ func TestBuffReader(t *testing.T) {
 		t.Error(err)
 	}
 
-	reader := NewBuffReader(bytes.NewReader(b), len(b))
+	reader, err := NewBuffReader(bytes.NewReader(b), len(b))
+	if err != nil {
+		t.Error(err)
+	}
 	t.Run("BufReader in one exec", func(t *testing.T) {
 		r, err := reader.Read()
 		if err != nil {
@@ -23,10 +26,12 @@ func TestBuffReader(t *testing.T) {
 		assert.Equal(t, b, r)
 	})
 
-	reader = NewBuffReader(bytes.NewReader(b), len(b))
+	reader, err = NewBuffReader(bytes.NewReader(b), len(b))
+	if err != nil {
+		t.Error(err)
+	}
 
 	t.Run("BufReader in chunks", func(t *testing.T) {
-		reader.SetChunk(1)
 		r, err := reader.Read()
 		if err != nil {
 			t.Error(err)

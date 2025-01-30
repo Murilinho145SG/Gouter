@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/Murilinho145SG/gouter/httpio"
@@ -42,7 +41,10 @@ func RunTLS(addrs string, router *Router, certStr, key string, server ...Server)
 	}
 
 	config := &tls.Config{
-		Certificates: []tls.Certificate{cert},
+		Certificates:             []tls.Certificate{cert},
+		MinVersion:               tls.VersionTLS12,
+		PreferServerCipherSuites: true,
+		CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519},
 	}
 
 	listener, err := net.Listen("tcp", addrs)
@@ -62,64 +64,24 @@ func RunTLS(addrs string, router *Router, certStr, key string, server ...Server)
 	}
 }
 
-func parseRoute(routes HandlersList, req *httpio.Request) string {
-	var originalPath string
-
-	for k := range routes {
-		partsReq := strings.Split(strings.Trim(req.Path, "/"), "/")
-		parts := strings.Split(strings.Trim(k, "/"), "/")
-
-		if len(parts) != len(partsReq) {
-			continue
-		}
-
-		var matched = true
-		var currentPath string
-
-		for i := 0; i < len(parts); i++ {
-			part := parts[i]
-			partReq := partsReq[i]
-
-			if strings.HasPrefix(part, ":") {
-				paramName := strings.TrimPrefix(part, ":")
-				req.Params.Add(paramName, partReq)
-				currentPath += "/" + part
-			} else if part == partReq {
-				if part != "" {
-					currentPath += "/" + part
-				}
-			} else {
-				matched = false
-				break
-			}
-		}
-
-		if matched {
-			originalPath = currentPath
-			break
-		}
-	}
-
-	return originalPath
-}
-
 var DefaultBuffer = 8192
 
 func handleConn(conn net.Conn, router *Router, server ...Server) {
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(time.Second * 10))
+
 	req := parseConn(conn, server...)
-	if router.DebugMode {
-		log.Debug(conn.RemoteAddr().String(), "is connecting at", req.Path)
-	}
+	handler := router.ParseRoute(req)
 	response := httpio.NewResponse(conn)
-	writer := httpio.NewWriter(&response)
-	originalRoute := parseRoute(router.Routes, req)
-	var handler Handler
-	if originalRoute != "" {
-		handler = router.Routes[originalRoute]
-	} else {
-		handler = router.Routes[req.Path]
+	if req == nil {
+		response.Code = 413
+		response.Write()
+		return
 	}
+
+	writer := httpio.NewWriter(&response)
+
+	log.Debug(conn.RemoteAddr().String(), "is connecting at", req.Path)
 
 	if handler != nil {
 		handler(writer, req)
@@ -130,9 +92,9 @@ func handleConn(conn net.Conn, router *Router, server ...Server) {
 
 	err := response.Write()
 	if err != nil {
-		log.Error(err)
-		return
+		log.Debug(err)
 	}
+
 	return
 }
 
@@ -154,9 +116,11 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 		var read_bytes []byte
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
 		for {
 			deadline, _ := ctx.Deadline()
 			conn.SetReadDeadline(deadline)
+
 			n, err := conn.Read(buffer)
 			if err != nil {
 				if err == io.EOF {
@@ -173,6 +137,7 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 				if bytes.Contains(read_bytes, []byte("\r\n\r\n")) {
 					values := bytes.SplitN(read_bytes, []byte("\r\n\r\n"), 2)
 					headers := values[0]
+
 					err = req.Parser(headers)
 					if err != nil {
 						fmt.Println(err.Error())
@@ -190,6 +155,8 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 			select {
 			case <-ctx.Done():
 				return nil
+			default:
+				continue
 			}
 		}
 	} else {
@@ -208,6 +175,7 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 			if bytes.Contains(data, []byte("\r\n\r\n")) {
 				values := bytes.SplitN(data, []byte("\r\n\r\n"), 2)
 				headers := values[0]
+
 				err = req.Parser(headers)
 				if err != nil {
 					fmt.Println(err.Error())

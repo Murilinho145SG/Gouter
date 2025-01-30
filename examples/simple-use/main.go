@@ -9,9 +9,9 @@ func main() {
 	/*
 		Statement to start the router to be able to read the routes
 	*/
-	router := gouter.NewRouter(false)
+	router := gouter.NewRouter()
 	router.Route("/example", func(w httpio.Writer, r *httpio.Request) {
-		w.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Headers().Add("Access-Control-Allow-Methods", "GET, OPTIONS")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(200)

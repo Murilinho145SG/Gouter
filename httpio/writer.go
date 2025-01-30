@@ -8,14 +8,16 @@ import (
 
 type Writer struct {
 	response *Response
-	Headers
 }
 
 func NewWriter(response *Response) Writer {
 	return Writer{
 		response: response,
-		Headers:  make(Headers),
 	}
+}
+
+func (w *Writer) Headers() Headers {
+	return w.response.Headers
 }
 
 func (w *Writer) WriteHeader(statusCode uint) {
@@ -30,8 +32,20 @@ func (w *Writer) WriteHeader(statusCode uint) {
 func (w *Writer) Write(value []byte) {
 	if w.response.Code == 0 {
 		w.WriteHeader(200)
+		log.WarnSkip(1, "For good practice, declare the status code before writing the body for better readability or use WriteWR")
 	}
+
+	if len(w.response.Body) > 0 {
+		log.WarnSkip(1, "The body already has information saved. Configure to concatenate the body")
+		return
+	}
+
 	w.response.Body = append(w.response.Body, value...)
+}
+
+func (w *Writer) WriteWR(value []byte, statusCode uint) {
+	w.WriteHeader(statusCode)
+	w.Write(value)
 }
 
 func (w *Writer) WriteJson(value any, indent bool) error {

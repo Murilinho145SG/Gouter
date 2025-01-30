@@ -3,10 +3,12 @@ package httpio
 import (
 	"errors"
 	"io"
+	"net/textproto"
 	"strconv"
 	"strings"
 
 	"github.com/Murilinho145SG/gouter/buffer"
+	"github.com/Murilinho145SG/gouter/log"
 )
 
 type Headers map[string]string
@@ -25,7 +27,7 @@ type Request struct {
 	Path    string
 	Headers Headers
 	Version string
-	Body    buffer.BuffReader
+	Body    *buffer.BuffReader
 	Params  Params
 }
 
@@ -42,16 +44,24 @@ func (r *Request) SetBody(body io.Reader) {
 	}
 
 	lengthStr, err := r.Headers.Get("Content-Length")
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+	
 	var length int
-	if err == nil {
-		var err error
-		length, err = strconv.Atoi(strings.TrimSpace(lengthStr))
-		if err != nil {
-			length = 0
-		}
+	length, err = strconv.Atoi(strings.TrimSpace(lengthStr))
+	if err != nil {
+		log.Error(err.Error())
+		length = 0
 	}
 
-	br := buffer.NewBuffReader(body, length)
+	br, err := buffer.NewBuffReader(body, length)
+	if err != nil {
+		log.Error(err.Error(), length)
+		return
+	}
+
 	r.Body = br
 }
 
@@ -70,8 +80,8 @@ func (r *Request) Parser(headersByte []byte) error {
 		parts := strings.SplitN(line, ":", 2)
 
 		if len(parts) == 2 {
-			key := parts[0]
-			value := parts[1]
+			key := textproto.TrimString(parts[0])
+			value := textproto.TrimString(parts[1])
 			valueTrim, found := strings.CutPrefix(value, " ")
 			if !found {
 				r.Headers.Add(key, value)
@@ -123,6 +133,7 @@ func (p Params) Del(key string) error {
 }
 
 func (h Headers) Add(key, value string) error {
+	key = strings.ToLower(key)
 	_, err := h.Get(key)
 	if err == nil {
 		return ErrAlreadyExists
@@ -134,6 +145,7 @@ func (h Headers) Add(key, value string) error {
 }
 
 func (h Headers) Get(key string) (string, error) {
+	key = strings.ToLower(key)
 	value := h[key]
 	if value == "" {
 		return "", ErrNotExist
@@ -143,10 +155,12 @@ func (h Headers) Get(key string) (string, error) {
 }
 
 func (h Headers) Set(key, value string) {
+	key = strings.ToLower(key)
 	h[key] = value
 }
 
 func (h Headers) Del(key string) error {
+	key = strings.ToLower(key)
 	_, err := h.Get(key)
 	if err != nil {
 		return err

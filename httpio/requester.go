@@ -1,6 +1,7 @@
 package httpio
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/textproto"
@@ -51,13 +52,17 @@ type Request struct {
 
 	// Params contains request parameters (e.g., query or path parameters).
 	Params Params
+
+	// RemoteAddr for get ip the request
+	RemoteAddr string
 }
 
 // NewRequest creates and returns a new empty Request instance.
-func NewRequest() *Request {
+func NewRequest(addrs string) *Request {
 	return &Request{
-		Headers: make(Headers),
-		Params:  make(Params),
+		Headers:    make(Headers),
+		Params:     make(Params),
+		RemoteAddr: addrs,
 	}
 }
 
@@ -93,6 +98,31 @@ func (r *Request) SetBody(body io.Reader) {
 	}
 
 	r.Body = br
+}
+
+// ReadJson reads the JSON data from the request body and unmarshals it into the provided value.
+// The value parameter should be a pointer to a struct or a map that matches the structure of the JSON.
+// 
+// Steps:
+// 1. It reads the raw body data from the request using r.Body.Read().
+// 2. If there is an error reading the body, it returns the error immediately.
+// 3. If the body is read successfully, it attempts to unmarshal the JSON data into the provided value.
+// 4. If unmarshaling fails, the function returns the corresponding error.
+//
+// Parameters:
+//   - value: A pointer to the variable where the unmarshaled JSON data will be stored.
+//
+// Returns:
+//   - error: An error if reading the body or unmarshaling fails, otherwise nil.
+func (r *Request) ReadJson(value any) error {
+    // Read the raw body data from the request
+    b, err := r.Body.Read()
+    if err != nil {
+        // Return the error if reading the body fails
+        return err
+    }
+    // Unmarshal the JSON data into the provided value
+    return json.Unmarshal(b, value)
 }
 
 // Parser parses raw HTTP headers from a byte slice and extracts the request method, path, and headers.

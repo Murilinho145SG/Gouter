@@ -143,7 +143,7 @@ func parseConn(conn net.Conn, server ...Server) *httpio.Request {
 	}
 
 	// Create a new HTTP request
-	req := httpio.NewRequest()
+	req := httpio.NewRequest(conn.RemoteAddr().String())
 
 	// If chunked reading is enabled, read the request in chunks
 	if serverConfig.InitialReadChunk {

@@ -14,7 +14,7 @@ func TestParser(t *testing.T) {
 		t.Error(err)
 	}
 
-	req := NewRequest()
+	req := NewRequest("")
 	t.Run("Parsing headers", func(t *testing.T) {
 		err := req.Parser(b)
 		if err != nil {

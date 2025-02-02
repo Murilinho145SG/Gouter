@@ -192,5 +192,5 @@ func (g *Group) Route(route string, handler Handler) {
 	}
 
 	// Register the route with the group prefix
-	g.router.Routes.NewRoute(g.pathGroup+route, handler)
+	g.router.Route(g.pathGroup+route, handler)
 }

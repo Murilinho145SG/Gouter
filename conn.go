@@ -12,26 +12,26 @@ Features:
 package gouter
 
 import (
-    "bufio"
-    "bytes"
-    "crypto/tls"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "html/template"
-    "io"
-    "mime"
-    "net"
-    "net/http"
-    "net/textproto"
-    "net/url"
-    "os"
-    "path/filepath"
-    "strconv"
-    "strings"
-    "time"
+	"bufio"
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html/template"
+	"io"
+	"mime"
+	"net"
+	"net/http"
+	"net/textproto"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
-    "github.com/Murilinho145SG/gouter/log"
+	"github.com/Murilinho145SG/gouter/log"
 )
 
 const (
@@ -131,7 +131,7 @@ func Run(addrs string, r *router) error {
 // - r: Router instance
 func handleConn(c net.Conn, r *router) {
     defer c.Close()
-    
+
     // Parse HTTP request
     req, err := parserConn(c)
     if err != nil {
@@ -385,11 +385,11 @@ func (r *Request) parser(headersByte []byte) error {
 
         key := textproto.TrimBytes(parts[0])
         value := textproto.TrimBytes(parts[1])
-        
+
         // Normalize header key and value
         normalizedKey := strings.ToLower(string(key))
         normalizedValue := strings.TrimPrefix(string(value), " ")
-        
+
         r.Headers.Add(normalizedKey, normalizedValue)
     }
 
@@ -535,7 +535,20 @@ func ListenFiles(w *Writer, r *Request, path string) error {
 
     // HTML template for directory listing
     tmpl := template.Must(template.New("files").Parse(`
-    <html>/* ... */</html>
+   	<html>
+	<head>
+		<title>File List</title>
+	</head>
+	<body>
+		<h1>Files in {{.Directory}}</h1>
+		<ul>
+			<li><a href="../">../</a></li>
+			{{range .Files}}
+			<li><a href="{{$.BasePath}}/{{.Name}}{{if .IsDir}}/{{end}}">{{.Name}}{{if .IsDir}}/{{end}}</a></li>
+			{{end}}
+		</ul>
+	</body>
+	</html>
     `))
 
     data := struct {
@@ -671,10 +684,10 @@ func startDoc(r *router) {
 // handleDocRequest serves documentation HTML
 func handleDocRequest(c net.Conn, r *router) {
     defer c.Close()
-    
+
     _, err := parserConn(c)
     if err != nil {
-    	log.Error(err)	
+    	log.Error(err)
     	return
     }
     w := newWriter(c)

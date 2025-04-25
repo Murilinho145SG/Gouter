@@ -672,8 +672,12 @@ func startDoc(r *router) {
 func handleDocRequest(c net.Conn, r *router) {
     defer c.Close()
     
+    _, err := parserConn(c)
+    if err != nil {
+    	log.Error(err)	
+    	return
+    }
     w := newWriter(c)
-    content, _ := os.ReadFile("./test/index.html")
 
     // Documentation template with JSON formatting helpers
     tmpl := template.Must(template.New("docs").Funcs(template.FuncMap{
@@ -682,7 +686,7 @@ func handleDocRequest(c net.Conn, r *router) {
             return string(b)
         },
         "lower": strings.ToLower,
-    }).Parse(string(content)))
+    }).Parse(docsTemplate))
 
     data := struct {
         Title  string

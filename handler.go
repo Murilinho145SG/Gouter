@@ -27,7 +27,7 @@ type handlerList map[string]Handler
 type Middleware func(handler Handler) Handler
 
 // router manages routes, middleware, and documentation
-type router struct {
+type Router struct {
 	handlerList handlerList // Map of registered routes
 	mws         []Middleware // List of global middlewares
 	docs        []*RouteInfo // Route documentation store
@@ -66,15 +66,15 @@ func (r *RouteInfo) SetParam(paramName, ty, desc string) *RouteInfo {
 }
 
 // NewRouter creates and returns a new router instance
-func NewRouter() *router {
-	return &router{
+func NewRouter() *Router {
+	return &Router{
 		handlerList: make(handlerList),
 	}
 }
 
 // parseRoute matches incoming requests to registered routes
 // Returns the appropriate handler or nil if no match found
-func (r *router) parseRoute(req *Request) Handler {
+func (r *Router) parseRoute(req *Request) Handler {
 	if req == nil {
 		return nil
 	}
@@ -141,7 +141,7 @@ func (r *router) parseRoute(req *Request) Handler {
 // Route registers a new handler for a specific path
 // methods: Optional HTTP method specification (defaults to GET)
 // Returns RouteInfo for documentation purposes
-func (r *router) Route(path string, handler Handler, methods ...string) *RouteInfo {
+func (r *Router) Route(path string, handler Handler, methods ...string) *RouteInfo {
 	// Check for existing route
 	if r.handlerList[path] != nil {
 		log.WarnE(2, "This path ["+path+"] already exists.")
@@ -184,7 +184,7 @@ func (r *router) Route(path string, handler Handler, methods ...string) *RouteIn
 }
 
 // Use adds middleware to the global middleware chain
-func (r *router) Use(mw Middleware) {
+func (r *Router) Use(mw Middleware) {
 	r.mws = append(r.mws, mw)
 }
 
@@ -202,13 +202,13 @@ func (h handlerList) getHandler(path string) Handler {
 }
 
 // Group creates a route group with common configuration
-func (r *router) Group(path string, handler GroupFunc) {
+func (r *Router) Group(path string, handler GroupFunc) {
 	handler(newGroup(r, path))
 }
 
 // Group represents a set of routes with shared configuration
 type Group struct {
-	router    *router      // Parent router
+	router    *Router      // Parent router
 	pathGroup string       // Group path prefix
 	mw        []Middleware // Group-specific middleware
 }
@@ -217,7 +217,7 @@ type Group struct {
 type GroupFunc func(g *Group)
 
 // newGroup creates a new route group instance
-func newGroup(router *router, pathGroup string) *Group {
+func newGroup(router *Router, pathGroup string) *Group {
 	return &Group{
 		router:    router,
 		pathGroup: pathGroup,

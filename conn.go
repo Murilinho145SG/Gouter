@@ -41,7 +41,7 @@ const (
 
 // server represents the HTTP server instance
 type server struct {
-    router *router // Main request router
+    router *Router // Main request router
 }
 
 // RunTLS starts an HTTPS server on the specified address
@@ -51,7 +51,7 @@ type server struct {
 // - certStr: Path to SSL certificate file
 // - key: Path to private key file
 // Returns error if server fails to start
-func RunTLS(addrs string, r *router, certStr, key string) error {
+func RunTLS(addrs string, r *Router, certStr, key string) error {
     // Load TLS certificate
     cert, err := tls.LoadX509KeyPair(certStr, key)
     if err != nil {
@@ -104,7 +104,7 @@ func RunTLS(addrs string, r *router, certStr, key string) error {
 // - addrs: Server address (e.g., ":8080")
 // - r: Router instance
 // Returns error if server fails to start
-func Run(addrs string, r *router) error {
+func Run(addrs string, r *Router) error {
     l, err := net.Listen("tcp", addrs)
     if err != nil {
         return err
@@ -129,7 +129,7 @@ func Run(addrs string, r *router) error {
 // Args:
 // - c: Network connection
 // - r: Router instance
-func handleConn(c net.Conn, r *router) {
+func handleConn(c net.Conn, r *Router) {
     defer c.Close()
 
     // Parse HTTP request
@@ -571,7 +571,7 @@ func Error(w *Writer, err error, code uint) {
 }
 
 // ServerStatic configures static file serving
-func ServerStatic(router *router, basePath, fsRoot string) {
+func ServerStatic(router *Router, basePath, fsRoot string) {
     basePath = "/" + strings.Trim(basePath, "/")
     fsRoot = filepath.Clean(fsRoot)
 
@@ -663,7 +663,7 @@ func isClosedConnectionError(err error) bool {
 }
 
 // startDoc starts documentation server on port 7665
-func startDoc(r *router) {
+func startDoc(r *Router) {
     listener, err := net.Listen("tcp", "localhost:7665")
     if err != nil {
         log.Error(err)
@@ -682,7 +682,7 @@ func startDoc(r *router) {
 }
 
 // handleDocRequest serves documentation HTML
-func handleDocRequest(c net.Conn, r *router) {
+func handleDocRequest(c net.Conn, r *Router) {
     defer c.Close()
 
     _, err := parserConn(c)

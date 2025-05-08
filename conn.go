@@ -35,13 +35,13 @@ import (
 )
 
 const (
-    // Maximum allowed size for HTTP headers (1MB)
-    defaultMaxHeaderBytes = 1 << 20
+	// Maximum allowed size for HTTP headers (1MB)
+	defaultMaxHeaderBytes = 1 << 20
 )
 
 // server represents the HTTP server instance
 type server struct {
-    router *Router // Main request router
+	router *Router // Main request router
 }
 
 // RunTLS starts an HTTPS server on the specified address
@@ -52,51 +52,51 @@ type server struct {
 // - key: Path to private key file
 // Returns error if server fails to start
 func RunTLS(addrs string, r *Router, certStr, key string) error {
-    // Load TLS certificate
-    cert, err := tls.LoadX509KeyPair(certStr, key)
-    if err != nil {
-        return err
-    }
+	// Load TLS certificate
+	cert, err := tls.LoadX509KeyPair(certStr, key)
+	if err != nil {
+		return err
+	}
 
-    // Configure TLS parameters
-    config := &tls.Config{
-        Certificates:             []tls.Certificate{cert},
-        MinVersion:               tls.VersionTLS12,
-        PreferServerCipherSuites: true,
-        CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519},
-    }
+	// Configure TLS parameters
+	config := &tls.Config{
+		Certificates:             []tls.Certificate{cert},
+		MinVersion:               tls.VersionTLS12,
+		PreferServerCipherSuites: true,
+		CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519},
+	}
 
-    // Create TCP listener
-    l, err := net.Listen("tcp", addrs)
-    if err != nil {
-        return err
-    }
+	// Create TCP listener
+	l, err := net.Listen("tcp", addrs)
+	if err != nil {
+		return err
+	}
 
-    // Main connection acceptance loop
-    for {
-        conn, err := l.Accept()
-        if err != nil {
-            log.Error(err)
-            continue
-        }
+	// Main connection acceptance loop
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			log.Error(err)
+			continue
+		}
 
-        // Wrap connection in TLS
-        tlsConn := tls.Server(conn, config)
+		// Wrap connection in TLS
+		tlsConn := tls.Server(conn, config)
 
-        // Set handshake timeout
-        handshakeDeadline := time.Now().Add(5 * time.Second)
-        tlsConn.SetDeadline(handshakeDeadline)
-        if err := tlsConn.Handshake(); err != nil {
-            tlsConn.Close()
-            continue
-        }
+		// Set handshake timeout
+		handshakeDeadline := time.Now().Add(5 * time.Second)
+		tlsConn.SetDeadline(handshakeDeadline)
+		if err := tlsConn.Handshake(); err != nil {
+			tlsConn.Close()
+			continue
+		}
 
-        // Remove deadline after handshake
-        tlsConn.SetDeadline(time.Time{})
+		// Remove deadline after handshake
+		tlsConn.SetDeadline(time.Time{})
 
-        // Handle connection in new goroutine
-        go handleConn(tlsConn, r)
-    }
+		// Handle connection in new goroutine
+		go handleConn(tlsConn, r)
+	}
 }
 
 // Run starts an HTTP server on the specified address
@@ -105,24 +105,24 @@ func RunTLS(addrs string, r *Router, certStr, key string) error {
 // - r: Router instance
 // Returns error if server fails to start
 func Run(addrs string, r *Router) error {
-    l, err := net.Listen("tcp", addrs)
-    if err != nil {
-        return err
-    }
+	l, err := net.Listen("tcp", addrs)
+	if err != nil {
+		return err
+	}
 
-    // Start documentation server
-    go startDoc(r)
+	// Start documentation server
+	go startDoc(r)
 
-    // Main connection acceptance loop
-    for {
-        conn, err := l.Accept()
-        if err != nil {
-            log.Error(err)
-        }
+	// Main connection acceptance loop
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			log.Error(err)
+		}
 
-        // Handle connection in new goroutine
-        go handleConn(conn, r)
-    }
+		// Handle connection in new goroutine
+		go handleConn(conn, r)
+	}
 }
 
 // handleConn processes an incoming HTTP connection
@@ -130,33 +130,33 @@ func Run(addrs string, r *Router) error {
 // - c: Network connection
 // - r: Router instance
 func handleConn(c net.Conn, r *Router) {
-    defer c.Close()
+	defer c.Close()
 
-    // Parse HTTP request
-    req, err := parserConn(c)
-    if err != nil {
-        log.Error(err)
-        return
-    }
+	// Parse HTTP request
+	req, err := parserConn(c)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-    // Create response writer
-    w := newWriter(c)
+	// Create response writer
+	w := newWriter(c)
 
-    // Find matching route handler
-    handler := r.parseRoute(req)
-    if handler != nil {
-        handler(req, w)
-    } else {
-        w.code = http.StatusNotFound
-    }
+	// Find matching route handler
+	handler := r.parseRoute(req)
+	if handler != nil {
+		handler(req, w)
+	} else {
+		w.code = http.StatusNotFound
+	}
 
-    // Send response if headers haven't been sent
-    if !w.headersSent {
-        err = w.write()
-        if err != nil {
-            log.Error(err)
-        }
-    }
+	// Send response if headers haven't been sent
+	if !w.headersSent {
+		err = w.write()
+		if err != nil {
+			log.Error(err)
+		}
+	}
 }
 
 // parserConn parses an HTTP request from a network connection
@@ -164,157 +164,163 @@ func handleConn(c net.Conn, r *Router) {
 // - c: Network connection
 // Returns parsed Request or error
 func parserConn(c net.Conn) (*Request, error) {
-    var (
-        buffer     bytes.Buffer
-        headersLen int
-    )
+	const timeout = 10 * time.Second
+	if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, errors.New("invalid headers!")
+	}
+	defer c.SetReadDeadline(time.Time{})
 
-    // Read headers until we find the empty line separator
-    for {
-        temp := make([]byte, 4096)
-        n, err := c.Read(temp)
-        if err != nil {
-            if errors.Is(err, io.EOF) {
-                continue
-            }
-            return nil, err
-        }
+	var (
+		buffer     bytes.Buffer
+		headersLen int
+	)
 
-        buffer.Write(temp[:n])
-        headersLen = buffer.Len()
+	// Read headers until we find the empty line separator
+	for {
+		temp := make([]byte, 4096)
+		n, err := c.Read(temp)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				continue
+			}
+			return nil, err
+		}
 
-        // Check for header termination sequence
-        if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
-            break
-        }
+		buffer.Write(temp[:n])
+		headersLen = buffer.Len()
 
-        // Prevent header overflow
-        if headersLen >= defaultMaxHeaderBytes {
-            return nil, errors.New("headers exceed maximum size")
-        }
-    }
+		// Check for header termination sequence
+		if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
+			break
+		}
 
-    data := buffer.Bytes()
-    idx := bytes.Index(data, []byte("\r\n\r\n"))
-    if idx == -1 {
-        return nil, errors.New("malformed headers")
-    }
+		// Prevent header overflow
+		if headersLen >= defaultMaxHeaderBytes {
+			return nil, errors.New("headers exceed maximum size")
+		}
+	}
 
-    // Split headers and body
-    headers := data[:idx]
-    bodyStart := idx + len("\r\n\r\n")
-    initialBody := data[bodyStart:]
+	data := buffer.Bytes()
+	idx := bytes.Index(data, []byte("\r\n\r\n"))
+	if idx == -1 {
+		return nil, errors.New("malformed headers")
+	}
 
-    req := newRequest()
-    if err := req.parser(headers); err != nil {
-        return nil, err
-    }
+	// Split headers and body
+	headers := data[:idx]
+	bodyStart := idx + len("\r\n\r\n")
+	initialBody := data[bodyStart:]
 
-    // Check for chunked transfer encoding
-    var isChunked bool
-    if te := req.Headers.Get("transfer-encoding"); te != "" {
-        isChunked = (te == "chunked")
-    }
+	req := newRequest()
+	if err := req.parser(headers); err != nil {
+		return nil, err
+	}
 
-    // Create appropriate body reader
-    var bodyReader io.Reader
-    if isChunked {
-        bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
-    } else {
-        // Handle content-length based body
-        contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
-        if contentLength > 0 {
-            remaining := int64(contentLength) - int64(len(initialBody))
-            bodyReader = io.MultiReader(
-                bytes.NewReader(initialBody),
-                io.LimitReader(c, remaining),
-            )
-        } else {
-            bodyReader = bytes.NewReader(initialBody)
-        }
-    }
+	// Check for chunked transfer encoding
+	var isChunked bool
+	if te := req.Headers.Get("transfer-encoding"); te != "" {
+		isChunked = (te == "chunked")
+	}
 
-    req.Body = bodyReader
-    req.RemoteAddrs = c.RemoteAddr().String()
+	// Create appropriate body reader
+	var bodyReader io.Reader
+	if isChunked {
+		bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
+	} else {
+		// Handle content-length based body
+		contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
+		if contentLength > 0 {
+			remaining := int64(contentLength) - int64(len(initialBody))
+			bodyReader = io.MultiReader(
+				bytes.NewReader(initialBody),
+				io.LimitReader(c, remaining),
+			)
+		} else {
+			bodyReader = bytes.NewReader(initialBody)
+		}
+	}
 
-    return req, nil
+	req.Body = bodyReader
+	req.RemoteAddrs = c.RemoteAddr().String()
+
+	return req, nil
 }
 
 // chunkedReader implements chunked transfer encoding decoding
 type chunkedReader struct {
-    r    io.Reader
-    done bool
+	r    io.Reader
+	done bool
 }
 
 // newChunkedReader creates a new chunked encoding reader
 func newChunkedReader(r io.Reader) io.Reader {
-    return &chunkedReader{r: bufio.NewReader(r)}
+	return &chunkedReader{r: bufio.NewReader(r)}
 }
 
 // Read implements the io.Reader interface for chunked encoding
 func (cr *chunkedReader) Read(p []byte) (n int, err error) {
-    if cr.done {
-        return 0, io.EOF
-    }
+	if cr.done {
+		return 0, io.EOF
+	}
 
-    // Read chunk size line
-    line, err := cr.readLine()
-    if err != nil {
-        return 0, err
-    }
+	// Read chunk size line
+	line, err := cr.readLine()
+	if err != nil {
+		return 0, err
+	}
 
-    // Parse chunk size
-    chunkSizeHex := strings.TrimSpace(strings.Split(string(line), ";")[0])
-    chunkSize, err := strconv.ParseInt(chunkSizeHex, 16, 64)
-    if err != nil {
-        return 0, fmt.Errorf("invalid chunk size: %v", err)
-    }
+	// Parse chunk size
+	chunkSizeHex := strings.TrimSpace(strings.Split(string(line), ";")[0])
+	chunkSize, err := strconv.ParseInt(chunkSizeHex, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid chunk size: %v", err)
+	}
 
-    // Handle end of chunked body
-    if chunkSize == 0 {
-        cr.done = true
-        // Read and ignore trailing headers
-        for {
-            line, err := cr.readLine()
-            if err != nil || len(line) == 0 {
-                break
-            }
-        }
-        return 0, io.EOF
-    }
+	// Handle end of chunked body
+	if chunkSize == 0 {
+		cr.done = true
+		// Read and ignore trailing headers
+		for {
+			line, err := cr.readLine()
+			if err != nil || len(line) == 0 {
+				break
+			}
+		}
+		return 0, io.EOF
+	}
 
-    // Read chunk data
-    data := make([]byte, chunkSize)
-    _, err = io.ReadFull(cr.r, data)
-    if err != nil {
-        return 0, err
-    }
+	// Read chunk data
+	data := make([]byte, chunkSize)
+	_, err = io.ReadFull(cr.r, data)
+	if err != nil {
+		return 0, err
+	}
 
-    // Read chunk terminator
-    if _, err := cr.readLine(); err != nil {
-        return 0, err
-    }
+	// Read chunk terminator
+	if _, err := cr.readLine(); err != nil {
+		return 0, err
+	}
 
-    // Copy data to output buffer
-    n = copy(p, data)
-    return n, nil
+	// Copy data to output buffer
+	n = copy(p, data)
+	return n, nil
 }
 
 // readLine reads a CRLF-terminated line
 func (cr *chunkedReader) readLine() ([]byte, error) {
-    var line []byte
-    for {
-        b := make([]byte, 1)
-        _, err := cr.r.Read(b)
-        if err != nil {
-            return nil, err
-        }
-        line = append(line, b[0])
-        if len(line) >= 2 && bytes.Equal(line[len(line)-2:], []byte("\r\n")) {
-            break
-        }
-    }
-    return line[:len(line)-2], nil
+	var line []byte
+	for {
+		b := make([]byte, 1)
+		_, err := cr.r.Read(b)
+		if err != nil {
+			return nil, err
+		}
+		line = append(line, b[0])
+		if len(line) >= 2 && bytes.Equal(line[len(line)-2:], []byte("\r\n")) {
+			break
+		}
+	}
+	return line[:len(line)-2], nil
 }
 
 // Headers represents HTTP headers (case-insensitive)
@@ -322,219 +328,219 @@ type Headers map[string]string
 
 // Add adds a header value
 func (h Headers) Add(key, value string) {
-    h[strings.ToLower(key)] = value
+	h[strings.ToLower(key)] = value
 }
 
 // Get retrieves a header value
 func (h Headers) Get(key string) string {
-    return h[strings.ToLower(key)]
+	return h[strings.ToLower(key)]
 }
 
 // Params represents route path parameters
 type Params map[string]string
 
 func (h Params) add(key, value string) {
-    h[key] = value
+	h[key] = value
 }
 
 // Get retrieves a path parameter value
 func (h Params) Get(key string) string {
-    return h[key]
+	return h[key]
 }
 
 // Request represents an HTTP request
 type Request struct {
-    Method      string
-    Path        string  // Request path
-    Headers     Headers // HTTP headers
-    Version     string  // HTTP version
-    Body        io.Reader
-    Params      Params  // Path parameters
-    RemoteAddrs string  // Client address
+	Method      string
+	Path        string  // Request path
+	Headers     Headers // HTTP headers
+	Version     string  // HTTP version
+	Body        io.Reader
+	Params      Params // Path parameters
+	RemoteAddrs string // Client address
 }
 
 // newRequest creates a new Request instance
 func newRequest() *Request {
-    return &Request{
-        Headers: make(Headers),
-        Params:  make(Params),
-    }
+	return &Request{
+		Headers: make(Headers),
+		Params:  make(Params),
+	}
 }
 
 // parser parses HTTP request headers
 func (r *Request) parser(headersByte []byte) error {
-    lines := bytes.Split(headersByte, []byte("\r\n"))
+	lines := bytes.Split(headersByte, []byte("\r\n"))
 
-    // Parse request line
-    titleParts := bytes.Split(lines[0], []byte(" "))
-    if len(titleParts) != 3 {
-        return errors.New("invalid headers")
-    }
+	// Parse request line
+	titleParts := bytes.Split(lines[0], []byte(" "))
+	if len(titleParts) != 3 {
+		return errors.New("invalid headers")
+	}
 
-    r.Method = string(titleParts[0])
-    r.Path = strings.TrimSpace(string(titleParts[1]))
-    r.Version = string(titleParts[2])
+	r.Method = string(titleParts[0])
+	r.Path = strings.TrimSpace(string(titleParts[1]))
+	r.Version = string(titleParts[2])
 
-    // Parse headers
-    for i := 1; i < len(lines); i++ {
-        line := lines[i]
-        parts := bytes.SplitN(line, []byte(":"), 2)
-        if len(parts) != 2 {
-            return errors.New("invalid header format")
-        }
+	// Parse headers
+	for i := 1; i < len(lines); i++ {
+		line := lines[i]
+		parts := bytes.SplitN(line, []byte(":"), 2)
+		if len(parts) != 2 {
+			return errors.New("invalid header format")
+		}
 
-        key := textproto.TrimBytes(parts[0])
-        value := textproto.TrimBytes(parts[1])
+		key := textproto.TrimBytes(parts[0])
+		value := textproto.TrimBytes(parts[1])
 
-        // Normalize header key and value
-        normalizedKey := strings.ToLower(string(key))
-        normalizedValue := strings.TrimPrefix(string(value), " ")
+		// Normalize header key and value
+		normalizedKey := strings.ToLower(string(key))
+		normalizedValue := strings.TrimPrefix(string(value), " ")
 
-        r.Headers.Add(normalizedKey, normalizedValue)
-    }
+		r.Headers.Add(normalizedKey, normalizedValue)
+	}
 
-    return nil
+	return nil
 }
 
 // Writer handles HTTP response generation
 type Writer struct {
-    code        uint      // HTTP status code
-    body        []byte    // Response body
-    Headers     Headers   // Response headers
-    c           net.Conn  // Network connection
-    headersSent bool      // Flag if headers were sent
-    io.Writer
+	code        uint     // HTTP status code
+	body        []byte   // Response body
+	Headers     Headers  // Response headers
+	c           net.Conn // Network connection
+	headersSent bool     // Flag if headers were sent
+	io.Writer
 }
 
 // newWriter creates a new response writer
 func newWriter(c net.Conn) *Writer {
-    return &Writer{
-        c:       c,
-        Headers: make(Headers),
-    }
+	return &Writer{
+		c:       c,
+		Headers: make(Headers),
+	}
 }
 
 // WriteHeader sets the HTTP status code
 func (w *Writer) WriteHeader(statusCode uint) {
-    if w.code != 0 {
-        log.WarnE(2, "WriteHeader called multiple times")
-        return
-    }
-    w.code = statusCode
+	if w.code != 0 {
+		log.WarnE(2, "WriteHeader called multiple times")
+		return
+	}
+	w.code = statusCode
 }
 
 // Write implements io.Writer interface
 func (w *Writer) Write(p []byte) (n int, err error) {
-    if w.headersSent {
-        return w.c.Write(p)
-    }
-    w.body = append(w.body, p...)
-    return len(p), nil
+	if w.headersSent {
+		return w.c.Write(p)
+	}
+	w.body = append(w.body, p...)
+	return len(p), nil
 }
 
 // WriteJson serializes data to JSON and sets appropriate headers
 func (w *Writer) WriteJson(body any) error {
-    b, err := json.Marshal(body)
-    if err != nil {
-        return err
-    }
-    w.Headers.Add("content-type", "application/json")
-    _, err = w.Write(b)
-    return err
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	w.Headers.Add("content-type", "application/json")
+	_, err = w.Write(b)
+	return err
 }
 
 // write sends the full HTTP response
 func (w *Writer) write() error {
-    if w.headersSent {
-        return nil
-    }
+	if w.headersSent {
+		return nil
+	}
 
-    // Build status line
-    statusLine := "HTTP/1.1 200 OK\r\n"
-    if w.code != 0 {
-        statusText := http.StatusText(int(w.code))
-        statusLine = fmt.Sprintf("HTTP/1.1 %d %s\r\n", w.code, statusText)
-    }
+	// Build status line
+	statusLine := "HTTP/1.1 200 OK\r\n"
+	if w.code != 0 {
+		statusText := http.StatusText(int(w.code))
+		statusLine = fmt.Sprintf("HTTP/1.1 %d %s\r\n", w.code, statusText)
+	}
 
-    // Build headers
-    var headersBuilder strings.Builder
-    if len(w.body) > 0 && w.Headers.Get("content-length") == "" {
-        w.Headers.Add("content-length", strconv.Itoa(len(w.body)))
-    }
+	// Build headers
+	var headersBuilder strings.Builder
+	if len(w.body) > 0 && w.Headers.Get("content-length") == "" {
+		w.Headers.Add("content-length", strconv.Itoa(len(w.body)))
+	}
 
-    for k, v := range w.Headers {
-        headersBuilder.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
-    }
+	for k, v := range w.Headers {
+		headersBuilder.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
+	}
 
-    fullHeader := statusLine + headersBuilder.String() + "\r\n"
+	fullHeader := statusLine + headersBuilder.String() + "\r\n"
 
-    // Write headers and body
-    _, err := w.c.Write(append([]byte(fullHeader), w.body...))
-    if err != nil {
-        return err
-    }
+	// Write headers and body
+	_, err := w.c.Write(append([]byte(fullHeader), w.body...))
+	if err != nil {
+		return err
+	}
 
-    w.headersSent = true
-    return nil
+	w.headersSent = true
+	return nil
 }
 
 // WriteHeaders sends headers without body
 func (w *Writer) WriteHeaders() error {
-    if w.headersSent {
-        return nil
-    }
+	if w.headersSent {
+		return nil
+	}
 
-    statusLine := "HTTP/1.1 200 OK\r\n"
-    if w.code != 0 {
-        statusText := http.StatusText(int(w.code))
-        statusLine = fmt.Sprintf("HTTP/1.1 %d %s\r\n", w.code, statusText)
-    }
+	statusLine := "HTTP/1.1 200 OK\r\n"
+	if w.code != 0 {
+		statusText := http.StatusText(int(w.code))
+		statusLine = fmt.Sprintf("HTTP/1.1 %d %s\r\n", w.code, statusText)
+	}
 
-    var headersBuilder strings.Builder
-    for k, v := range w.Headers {
-        headersBuilder.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
-    }
+	var headersBuilder strings.Builder
+	for k, v := range w.Headers {
+		headersBuilder.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
+	}
 
-    fullHeader := statusLine + headersBuilder.String() + "\r\n"
+	fullHeader := statusLine + headersBuilder.String() + "\r\n"
 
-    _, err := w.c.Write([]byte(fullHeader))
-    if err != nil {
-        return err
-    }
+	_, err := w.c.Write([]byte(fullHeader))
+	if err != nil {
+		return err
+	}
 
-    w.headersSent = true
-    return nil
+	w.headersSent = true
+	return nil
 }
 
 // ReceiveFile reads file contents from request body
 func ReceiveFile(r *Request, path string) (*os.File, error) {
-    b, err := io.ReadAll(r.Body)
-    if err != nil {
-        return nil, err
-    }
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
 
-    f, err := os.Create(path)
-    if err != nil {
-        return nil, err
-    }
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
 
-    if _, err := f.Write(b); err != nil {
-        f.Close()
-        return nil, err
-    }
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return nil, err
+	}
 
-    return f, nil
+	return f, nil
 }
 
 // ListenFiles generates directory listing HTML
 func ListenFiles(w *Writer, r *Request, path string) error {
-    entries, err := os.ReadDir(path)
-    if err != nil {
-        return err
-    }
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
 
-    // HTML template for directory listing
-    tmpl := template.Must(template.New("files").Parse(`
+	// HTML template for directory listing
+	tmpl := template.Must(template.New("files").Parse(`
    	<html>
 	<head>
 		<title>File List</title>
@@ -551,173 +557,173 @@ func ListenFiles(w *Writer, r *Request, path string) error {
 	</html>
     `))
 
-    data := struct {
-        Directory string
-        Files     []os.DirEntry
-        BasePath  string
-    }{
-        Directory: path,
-        Files:     entries,
-        BasePath:  strings.TrimSuffix(r.Path, "/"),
-    }
+	data := struct {
+		Directory string
+		Files     []os.DirEntry
+		BasePath  string
+	}{
+		Directory: path,
+		Files:     entries,
+		BasePath:  strings.TrimSuffix(r.Path, "/"),
+	}
 
-    return tmpl.Execute(w, data)
+	return tmpl.Execute(w, data)
 }
 
 // Error sends an error response
 func Error(w *Writer, err error, code uint) {
-    w.WriteHeader(code)
-    w.Write([]byte(err.Error()))
+	w.WriteHeader(code)
+	w.Write([]byte(err.Error()))
 }
 
 // ServerStatic configures static file serving
 func ServerStatic(router *Router, basePath, fsRoot string) {
-    basePath = "/" + strings.Trim(basePath, "/")
-    fsRoot = filepath.Clean(fsRoot)
+	basePath = "/" + strings.Trim(basePath, "/")
+	fsRoot = filepath.Clean(fsRoot)
 
-    // Directory listing handler
-    router.Route(basePath, func(r *Request, w *Writer) {
-        w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+	// Directory listing handler
+	router.Route(basePath, func(r *Request, w *Writer) {
+		w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
 
-        switch r.Method {
-        case "OPTIONS":
-            w.WriteHeader(200)
-        case "GET":
-            w.Headers.Add("Content-Type", "text/html; charset=utf-8")
-            if err := ListenFiles(w, r, fsRoot); err != nil {
-                Error(w, errors.New("directory listing failed"), 500)
-            }
-        default:
-            w.WriteHeader(http.StatusMethodNotAllowed)
-        }
-    })
+		switch r.Method {
+		case "OPTIONS":
+			w.WriteHeader(200)
+		case "GET":
+			w.Headers.Add("Content-Type", "text/html; charset=utf-8")
+			if err := ListenFiles(w, r, fsRoot); err != nil {
+				Error(w, errors.New("directory listing failed"), 500)
+			}
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
 
-    // File serving handler
-    router.Route(basePath+"/*", func(r *Request, w *Writer) {
-        // Path validation and normalization
-        urlPath := strings.TrimPrefix(r.Path, basePath)
-        decodedPath, err := url.PathUnescape(urlPath)
-        if err != nil {
-            w.WriteHeader(400)
-            return
-        }
+	// File serving handler
+	router.Route(basePath+"/*", func(r *Request, w *Writer) {
+		// Path validation and normalization
+		urlPath := strings.TrimPrefix(r.Path, basePath)
+		decodedPath, err := url.PathUnescape(urlPath)
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
 
-        filePath := filepath.Join(fsRoot, decodedPath)
-        cleanPath := filepath.Clean(filePath)
+		filePath := filepath.Join(fsRoot, decodedPath)
+		cleanPath := filepath.Clean(filePath)
 
-        // Security check
-        if !strings.HasPrefix(cleanPath, fsRoot) {
-            w.WriteHeader(403)
-            return
-        }
+		// Security check
+		if !strings.HasPrefix(cleanPath, fsRoot) {
+			w.WriteHeader(403)
+			return
+		}
 
-        // File handling
-        info, err := os.Stat(cleanPath)
-        if err != nil {
-            w.WriteHeader(404)
-            return
-        }
+		// File handling
+		info, err := os.Stat(cleanPath)
+		if err != nil {
+			w.WriteHeader(404)
+			return
+		}
 
-        if info.IsDir() {
-            ListenFiles(w, r, cleanPath)
-            return
-        }
+		if info.IsDir() {
+			ListenFiles(w, r, cleanPath)
+			return
+		}
 
-        // Open and serve file
-        file, err := os.Open(cleanPath)
-        if err != nil {
-            w.WriteHeader(404)
-            return
-        }
-        defer file.Close()
+		// Open and serve file
+		file, err := os.Open(cleanPath)
+		if err != nil {
+			w.WriteHeader(404)
+			return
+		}
+		defer file.Close()
 
-        stat, _ := file.Stat()
-        w.Headers.Add("Content-Length", strconv.FormatInt(stat.Size(), 10))
+		stat, _ := file.Stat()
+		w.Headers.Add("Content-Length", strconv.FormatInt(stat.Size(), 10))
 
-        // Set MIME type
-        if mimeType := mime.TypeByExtension(filepath.Ext(cleanPath)); mimeType != "" {
-            w.Headers.Add("Content-Type", mimeType)
-        } else {
-            w.Headers.Add("Content-Type", "application/octet-stream")
-        }
+		// Set MIME type
+		if mimeType := mime.TypeByExtension(filepath.Ext(cleanPath)); mimeType != "" {
+			w.Headers.Add("Content-Type", mimeType)
+		} else {
+			w.Headers.Add("Content-Type", "application/octet-stream")
+		}
 
-        w.WriteHeader(200)
-        if err := w.WriteHeaders(); err != nil {
-            log.Error(err)
-            return
-        }
+		w.WriteHeader(200)
+		if err := w.WriteHeaders(); err != nil {
+			log.Error(err)
+			return
+		}
 
-        // Stream file contents
-        _, err = io.Copy(w.c, file)
-        if err != nil && !isClosedConnectionError(err) {
-            log.Error(fmt.Errorf("error copying file: %w", err))
-        }
-    })
+		// Stream file contents
+		_, err = io.Copy(w.c, file)
+		if err != nil && !isClosedConnectionError(err) {
+			log.Error(fmt.Errorf("error copying file: %w", err))
+		}
+	})
 }
 
 // isClosedConnectionError checks for common connection closure errors
 func isClosedConnectionError(err error) bool {
-    return strings.Contains(err.Error(), "closed") ||
-        strings.Contains(err.Error(), "broken pipe") ||
-        strings.Contains(err.Error(), "reset by peer")
+	return strings.Contains(err.Error(), "closed") ||
+		strings.Contains(err.Error(), "broken pipe") ||
+		strings.Contains(err.Error(), "reset by peer")
 }
 
 // startDoc starts documentation server on port 7665
 func startDoc(r *Router) {
-    listener, err := net.Listen("tcp", "localhost:7665")
-    if err != nil {
-        log.Error(err)
-        return
-    }
+	listener, err := net.Listen("tcp", "localhost:7665")
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-    for {
-        conn, err := listener.Accept()
-        if err != nil {
-            log.Error(err)
-            return
-        }
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Error(err)
+			return
+		}
 
-        go handleDocRequest(conn, r)
-    }
+		go handleDocRequest(conn, r)
+	}
 }
 
 // handleDocRequest serves documentation HTML
 func handleDocRequest(c net.Conn, r *Router) {
-    defer c.Close()
+	defer c.Close()
 
-    _, err := parserConn(c)
-    if err != nil {
-    	log.Error(err)
-    	return
-    }
-    w := newWriter(c)
+	_, err := parserConn(c)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	w := newWriter(c)
 
-    // Documentation template with JSON formatting helpers
-    tmpl := template.Must(template.New("docs").Funcs(template.FuncMap{
-        "json": func(v interface{}) string {
-            b, _ := json.MarshalIndent(v, "", "  ")
-            return string(b)
-        },
-        "lower": strings.ToLower,
-    }).Parse(docsTemplate))
+	// Documentation template with JSON formatting helpers
+	tmpl := template.Must(template.New("docs").Funcs(template.FuncMap{
+		"json": func(v interface{}) string {
+			b, _ := json.MarshalIndent(v, "", "  ")
+			return string(b)
+		},
+		"lower": strings.ToLower,
+	}).Parse(docsTemplate))
 
-    data := struct {
-        Title  string
-        Routes []*RouteInfo
-    }{
-        Title:  "Gouter Documentation",
-        Routes: r.docs,
-    }
+	data := struct {
+		Title  string
+		Routes []*RouteInfo
+	}{
+		Title:  "Gouter Documentation",
+		Routes: r.docs,
+	}
 
-    w.Headers.Add("Content-Type", "text/html; charset=utf-8")
-    w.WriteHeader(200)
+	w.Headers.Add("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(200)
 
-    if err := tmpl.Execute(w, data); err != nil {
-        log.Error(err)
-        return
-    }
+	if err := tmpl.Execute(w, data); err != nil {
+		log.Error(err)
+		return
+	}
 
-    w.write()
+	w.write()
 }
 
 // HTML template constant omitted for brevity

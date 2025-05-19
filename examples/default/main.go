@@ -9,7 +9,7 @@ func main() {
 		w.Write([]byte("Hello World!"))
 	})
 	
-	if err := gouter.Run("0.0.0.0", r); err != nil {
+	if err := gouter.Run("0.0.0.0:8080", r); err != nil {
 		panic(err)
 	}
 }

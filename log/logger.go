@@ -20,10 +20,11 @@ import (
 
 // ANSI color escape codes for different log levels
 const (
-	infoColor  = "\033[34m"  // Blue
-	warnColor  = "\033[33m"  // Yellow
-	errorColor = "\033[31m"  // Red
-	debugColor = "\033[35m"  // Magenta
+	systemColor = "\033[36m"
+	infoColor   = "\033[34m" // Blue
+	warnColor   = "\033[33m" // Yellow
+	errorColor  = "\033[31m" // Red
+	debugColor  = "\033[35m" // Magenta
 )
 
 // Print handles low-level message formatting and output
@@ -33,7 +34,7 @@ const (
 func Print(args ...any) (int, error) {
 	w := os.Stdout
 	var buf bytes.Buffer
-	
+
 	// Format arguments with spaces between them
 	for i, arg := range args {
 		if i > 0 {
@@ -72,16 +73,24 @@ func parserColor(color, prefix string, encapsulation int, args ...any) {
 	lineStr := strconv.Itoa(line)
 
 	// Construct colored message components
-	msg := append([]any{fmt.Sprintf("%s[%s] \033[35m%s:%s\033[0m", 
-		color, 
-		prefix, 
-		file, 
-		lineStr)}, 
+	msg := append([]any{fmt.Sprintf("%s[%s] \033[35m%s:%s\033[0m",
+		color,
+		prefix,
+		file,
+		lineStr)},
 		args...)
 	Print(msg...)
 }
 
 // Basic log functions (depth = 2)
+
+// Gouter Default Logger with infos
+func System(args ...any) {
+	msg := append([]any{fmt.Sprintf("%s[Gouter]\033[0m",
+		systemColor)},
+		args...)
+	Print(msg...)
+}
 
 // Info logs informational messages (blue)
 func Info(args ...any) {
@@ -115,7 +124,7 @@ func WarnE(encapsulation int, args ...any) {
 	parserColor(warnColor, "Warn", encapsulation, args...)
 }
 
-// ErrorE logs errors with custom call depth 
+// ErrorE logs errors with custom call depth
 func ErrorE(encapsulation int, args ...any) {
 	parserColor(errorColor, "Error", encapsulation, args...)
 }

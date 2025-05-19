@@ -28,9 +28,10 @@ type Middleware func(handler Handler) Handler
 
 // router manages routes, middleware, and documentation
 type Router struct {
-	handlerList handlerList // Map of registered routes
+	handlerList handlerList  // Map of registered routes
 	mws         []Middleware // List of global middlewares
 	docs        []*RouteInfo // Route documentation store
+	docConfig   *Doc
 }
 
 // RouteInfo contains documentation metadata for a route
@@ -69,7 +70,17 @@ func (r *RouteInfo) SetParam(paramName, ty, desc string) *RouteInfo {
 func NewRouter() *Router {
 	return &Router{
 		handlerList: make(handlerList),
+		docConfig: &Doc{
+			Active: true,
+			Port: "7665",
+			Addrs: "localhost",
+		},
 	}
+}
+
+// Update doc configuration with logic
+func (r *Router) Update(callback func(d *Doc)) {
+	callback(r.docConfig)
 }
 
 // parseRoute matches incoming requests to registered routes
@@ -225,14 +236,14 @@ func newGroup(router *Router, pathGroup string) *Group {
 }
 
 // Route registers a route within the group
-func (g *Group) Route(path string, handler Handler) {
+func (g *Group) Route(path string, handler Handler, methods ...string) *RouteInfo {
 	// Apply group middleware
 	for _, mw := range g.mw {
 		handler = mw(handler)
 	}
 
 	// Register route with group prefix
-	g.router.Route(g.pathGroup+path, handler)
+	return g.router.Route(g.pathGroup+path, handler, methods...)
 }
 
 // Use adds middleware to the group's middleware chain

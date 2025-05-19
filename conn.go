@@ -1,13 +1,16 @@
 /*
 Package gouter implements a lightweight HTTP router with built-in documentation generation.
 
-Features:
-- Basic path routing with parameters
-- Static file serving
-- Automatic API documentation
-- HTTPS support
-- Chunked transfer encoding handling
-- Connection management
+Key Features:
+- Path routing with named parameters and wildcards
+- Static file serving with directory listing
+- Automatic API documentation generation with interactive UI
+- HTTPS/TLS support with modern cipher suites
+- Chunked transfer encoding handling for request bodies
+- Connection management with timeouts and proper closure
+- Middleware-ready architecture through handler chaining
+
+The router focuses on performance and simplicity while providing essential HTTP features.
 */
 package gouter
 
@@ -39,26 +42,32 @@ const (
 	defaultMaxHeaderBytes = 1 << 20
 )
 
-// server represents the HTTP server instance
-type server struct {
-	router *Router // Main request router
+// Doc configures the documentation server settings
+type Doc struct {
+	Active bool   // Enable/disable documentation server
+	Port   string // Documentation server port (default: "7665")
+	Addrs  string // Documentation server bind address
 }
 
-// RunTLS starts an HTTPS server on the specified address
+// RunTLS starts an HTTPS server with TLS configuration
 // Args:
-// - addrs: Server address (e.g., ":443")
-// - r: Router instance
-// - certStr: Path to SSL certificate file
-// - key: Path to private key file
-// Returns error if server fails to start
+//   - addrs: Server address to listen on (e.g., ":443")
+//   - r: Initialized Router instance
+//   - certStr: Path to SSL certificate file
+//   - key: Path to private key file
+// Returns:
+//   - error: Any error encountered during server startup
+//
+// Security Features:
+//   - TLS 1.2 minimum version
+//   - P256 and X25519 curve preferences
+//   - Server-side cipher suite preferences
 func RunTLS(addrs string, r *Router, certStr, key string) error {
-	// Load TLS certificate
 	cert, err := tls.LoadX509KeyPair(certStr, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load TLS certificate: %w", err)
 	}
 
-	// Configure TLS parameters
 	config := &tls.Config{
 		Certificates:             []tls.Certificate{cert},
 		MinVersion:               tls.VersionTLS12,
@@ -66,174 +75,171 @@ func RunTLS(addrs string, r *Router, certStr, key string) error {
 		CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519},
 	}
 
-	// Create TCP listener
 	l, err := net.Listen("tcp", addrs)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create listener: %w", err)
+	}
+	
+	if r.docConfig.Active {
+		go startDoc(r)
 	}
 
-	// Main connection acceptance loop
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			log.Error(err)
+			log.Error(fmt.Errorf("connection accept error: %w", err))
 			continue
 		}
 
-		// Wrap connection in TLS
 		tlsConn := tls.Server(conn, config)
-
-		// Set handshake timeout
 		handshakeDeadline := time.Now().Add(5 * time.Second)
 		tlsConn.SetDeadline(handshakeDeadline)
+		
 		if err := tlsConn.Handshake(); err != nil {
 			tlsConn.Close()
+			log.Error(fmt.Errorf("TLS handshake failed: %w", err))
 			continue
 		}
 
-		// Remove deadline after handshake
 		tlsConn.SetDeadline(time.Time{})
-
-		// Handle connection in new goroutine
 		go handleConn(tlsConn, r)
 	}
 }
 
 // Run starts an HTTP server on the specified address
 // Args:
-// - addrs: Server address (e.g., ":8080")
-// - r: Router instance
-// Returns error if server fails to start
+//   - addrs: Server address to listen on (e.g., ":8080")
+//   - r: Initialized Router instance
+// Returns:
+//   - error: Any error encountered during server startup
 func Run(addrs string, r *Router) error {
 	l, err := net.Listen("tcp", addrs)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	// Start documentation server
-	go startDoc(r)
+	if r.docConfig.Active {
+		go startDoc(r)
+	}
 
-	// Main connection acceptance loop
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			log.Error(err)
+			log.Error(fmt.Errorf("connection accept error: %w", err))
 		}
-
-		// Handle connection in new goroutine
 		go handleConn(conn, r)
 	}
 }
 
-// handleConn processes an incoming HTTP connection
+// handleConn processes incoming HTTP connections
 // Args:
-// - c: Network connection
-// - r: Router instance
+//   - c: Network connection to handle
+//   - r: Router instance for request routing
+//
+// Connection Handling:
+//   - Sets a 10-second read timeout
+//   - Automatically closes connection after handling
+//   - Recovers from panics in handler functions
 func handleConn(c net.Conn, r *Router) {
-	defer c.Close()
+	defer func() {
+		if err := recover(); err != nil {
+			log.Error(fmt.Errorf("panic in handler: %v", err))
+		}
+		c.Close()
+	}()
 
-	// Parse HTTP request
 	req, err := parserConn(c)
 	if err != nil {
-		log.Error(err)
+		log.Error(fmt.Errorf("request parsing failed: %w", err))
 		return
 	}
 
-	// Create response writer
 	w := newWriter(c)
-
-	// Find matching route handler
 	handler := r.parseRoute(req)
+	
 	if handler != nil {
 		handler(req, w)
 	} else {
 		w.code = http.StatusNotFound
 	}
 
-	// Send response if headers haven't been sent
 	if !w.headersSent {
-		err = w.write()
-		if err != nil {
-			log.Error(err)
+		if err := w.write(); err != nil {
+			log.Error(fmt.Errorf("response write failed: %w", err))
 		}
 	}
 }
 
-// parserConn parses an HTTP request from a network connection
+// parserConn parses HTTP request from network connection
 // Args:
-// - c: Network connection
-// Returns parsed Request or error
+//   - c: Active network connection
+// Returns:
+//   - *Request: Parsed request object
+//   - error: Any parsing errors encountered
+//
+// Parsing Features:
+//   - 10-second header read timeout
+//   - Chunked encoding support
+//   - Maximum header size enforcement
 func parserConn(c net.Conn) (*Request, error) {
 	const timeout = 10 * time.Second
 	if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, errors.New("invalid headers!")
+		return nil, fmt.Errorf("failed to set read deadline: %w", err)
 	}
 	defer c.SetReadDeadline(time.Time{})
 
-	var (
-		buffer     bytes.Buffer
-		headersLen int
-	)
+	var buffer bytes.Buffer
+	headersLen := 0
 
-	// Read headers until we find the empty line separator
 	for {
 		temp := make([]byte, 4096)
 		n, err := c.Read(temp)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				continue
-			}
-			return nil, err
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("header read error: %w", err)
 		}
 
 		buffer.Write(temp[:n])
 		headersLen = buffer.Len()
 
-		// Check for header termination sequence
 		if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
 			break
 		}
 
-		// Prevent header overflow
 		if headersLen >= defaultMaxHeaderBytes {
-			return nil, errors.New("headers exceed maximum size")
+			return nil, errors.New("headers exceed maximum size of 1MB")
 		}
 	}
 
 	data := buffer.Bytes()
 	idx := bytes.Index(data, []byte("\r\n\r\n"))
 	if idx == -1 {
-		return nil, errors.New("malformed headers")
+		return nil, errors.New("malformed headers - missing CRLF separator")
 	}
 
-	// Split headers and body
 	headers := data[:idx]
 	bodyStart := idx + len("\r\n\r\n")
 	initialBody := data[bodyStart:]
 
 	req := newRequest()
 	if err := req.parser(headers); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("header parsing failed: %w", err)
 	}
 
-	// Check for chunked transfer encoding
 	var isChunked bool
 	if te := req.Headers.Get("transfer-encoding"); te != "" {
 		isChunked = (te == "chunked")
 	}
 
-	// Create appropriate body reader
 	var bodyReader io.Reader
 	if isChunked {
 		bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
 	} else {
-		// Handle content-length based body
 		contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
 		if contentLength > 0 {
 			remaining := int64(contentLength) - int64(len(initialBody))
-			bodyReader = io.MultiReader(
-				bytes.NewReader(initialBody),
-				io.LimitReader(c, remaining),
+			bodyReader = io.LimitReader(
+				io.MultiReader(bytes.NewReader(initialBody), c),
+				remaining,
 			)
 		} else {
 			bodyReader = bytes.NewReader(initialBody)
@@ -242,44 +248,50 @@ func parserConn(c net.Conn) (*Request, error) {
 
 	req.Body = bodyReader
 	req.RemoteAddrs = c.RemoteAddr().String()
-
 	return req, nil
 }
 
-// chunkedReader implements chunked transfer encoding decoding
+// chunkedReader handles chunked transfer encoding decoding
 type chunkedReader struct {
 	r    io.Reader
 	done bool
 }
 
 // newChunkedReader creates a new chunked encoding reader
+// Args:
+//   - r: io.Reader containing chunked data
+// Returns properly initialized chunkedReader
 func newChunkedReader(r io.Reader) io.Reader {
 	return &chunkedReader{r: bufio.NewReader(r)}
 }
 
-// Read implements the io.Reader interface for chunked encoding
+// Read implements chunked encoding decoding logic
+// Returns:
+//   - n: Number of bytes read
+//   - err: Any decoding errors
+//
+// Chunk Handling:
+//   - Supports chunk extensions
+//   - Validates chunk size
+//   - Handles trailing headers
 func (cr *chunkedReader) Read(p []byte) (n int, err error) {
 	if cr.done {
 		return 0, io.EOF
 	}
 
-	// Read chunk size line
 	line, err := cr.readLine()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("chunk size read error: %w", err)
 	}
 
-	// Parse chunk size
 	chunkSizeHex := strings.TrimSpace(strings.Split(string(line), ";")[0])
 	chunkSize, err := strconv.ParseInt(chunkSizeHex, 16, 64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid chunk size: %v", err)
+		return 0, fmt.Errorf("invalid chunk size '%s': %w", chunkSizeHex, err)
 	}
 
-	// Handle end of chunked body
 	if chunkSize == 0 {
 		cr.done = true
-		// Read and ignore trailing headers
 		for {
 			line, err := cr.readLine()
 			if err != nil || len(line) == 0 {
@@ -289,30 +301,25 @@ func (cr *chunkedReader) Read(p []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	// Read chunk data
 	data := make([]byte, chunkSize)
-	_, err = io.ReadFull(cr.r, data)
-	if err != nil {
-		return 0, err
+	if _, err := io.ReadFull(cr.r, data); err != nil {
+		return 0, fmt.Errorf("chunk data read error: %w", err)
 	}
 
-	// Read chunk terminator
 	if _, err := cr.readLine(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("chunk terminator read error: %w", err)
 	}
 
-	// Copy data to output buffer
 	n = copy(p, data)
 	return n, nil
 }
 
-// readLine reads a CRLF-terminated line
+// readLine reads CRLF-terminated lines from chunked stream
 func (cr *chunkedReader) readLine() ([]byte, error) {
 	var line []byte
 	for {
 		b := make([]byte, 1)
-		_, err := cr.r.Read(b)
-		if err != nil {
+		if _, err := cr.r.Read(b); err != nil {
 			return nil, err
 		}
 		line = append(line, b[0])
@@ -323,15 +330,21 @@ func (cr *chunkedReader) readLine() ([]byte, error) {
 	return line[:len(line)-2], nil
 }
 
-// Headers represents HTTP headers (case-insensitive)
+// Headers represents HTTP headers with case-insensitive keys
 type Headers map[string]string
 
-// Add adds a header value
+// Add adds a header key-value pair
+// Args:
+//   - key: Header name (case-insensitive)
+//   - value: Header value
 func (h Headers) Add(key, value string) {
 	h[strings.ToLower(key)] = value
 }
 
-// Get retrieves a header value
+// Get retrieves a header value by name
+// Args:
+//   - key: Header name to retrieve (case-insensitive)
+// Returns header value or empty string if not found
 func (h Headers) Get(key string) string {
 	return h[strings.ToLower(key)]
 }
@@ -344,6 +357,9 @@ func (h Params) add(key, value string) {
 }
 
 // Get retrieves a path parameter value
+// Args:
+//   - key: Parameter name to retrieve
+// Returns parameter value or empty string if not found
 func (h Params) Get(key string) string {
 	return h[key]
 }
@@ -351,15 +367,15 @@ func (h Params) Get(key string) string {
 // Request represents an HTTP request
 type Request struct {
 	Method      string
-	Path        string  // Request path
-	Headers     Headers // HTTP headers
-	Version     string  // HTTP version
+	Path        string
+	Headers     Headers
+	Version     string
 	Body        io.Reader
-	Params      Params // Path parameters
-	RemoteAddrs string // Client address
+	Params      Params
+	RemoteAddrs string
 }
 
-// newRequest creates a new Request instance
+// newRequest creates a new initialized Request instance
 func newRequest() *Request {
 	return &Request{
 		Headers: make(Headers),
@@ -367,23 +383,36 @@ func newRequest() *Request {
 	}
 }
 
-// parser parses HTTP request headers
+// ReadJson deserializes request body into provided struct
+// Args:
+//   - v: Target struct for JSON decoding
+// Returns error if decoding fails
+func (r *Request) ReadJson(v any) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
+// parser processes HTTP request headers
 func (r *Request) parser(headersByte []byte) error {
 	lines := bytes.Split(headersByte, []byte("\r\n"))
+	if len(lines) == 0 {
+		return errors.New("empty request headers")
+	}
 
-	// Parse request line
 	titleParts := bytes.Split(lines[0], []byte(" "))
 	if len(titleParts) != 3 {
-		return errors.New("invalid headers")
+		return errors.New("invalid request line format")
 	}
 
 	r.Method = string(titleParts[0])
 	r.Path = strings.TrimSpace(string(titleParts[1]))
 	r.Version = string(titleParts[2])
 
-	// Parse headers
 	for i := 1; i < len(lines); i++ {
 		line := lines[i]
+		if len(line) == 0 {
+			continue
+		}
+
 		parts := bytes.SplitN(line, []byte(":"), 2)
 		if len(parts) != 2 {
 			return errors.New("invalid header format")
@@ -392,10 +421,8 @@ func (r *Request) parser(headersByte []byte) error {
 		key := textproto.TrimBytes(parts[0])
 		value := textproto.TrimBytes(parts[1])
 
-		// Normalize header key and value
 		normalizedKey := strings.ToLower(string(key))
-		normalizedValue := strings.TrimPrefix(string(value), " ")
-
+		normalizedValue := strings.TrimSpace(string(value))
 		r.Headers.Add(normalizedKey, normalizedValue)
 	}
 
@@ -404,11 +431,11 @@ func (r *Request) parser(headersByte []byte) error {
 
 // Writer handles HTTP response generation
 type Writer struct {
-	code        uint     // HTTP status code
-	body        []byte   // Response body
-	Headers     Headers  // Response headers
-	c           net.Conn // Network connection
-	headersSent bool     // Flag if headers were sent
+	code        uint
+	body        []byte
+	Headers     Headers
+	c           net.Conn
+	headersSent bool
 	io.Writer
 }
 
@@ -420,7 +447,17 @@ func newWriter(c net.Conn) *Writer {
 	}
 }
 
+// WriteJson serializes data to JSON and sets appropriate headers
+// Args:
+//   - v: Data structure to serialize
+// Returns error if serialization fails
+func (w *Writer) WriteJson(v any) error {
+	w.Headers.Add("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(v)
+}
+
 // WriteHeader sets the HTTP status code
+// Note: Can only be called once per response
 func (w *Writer) WriteHeader(statusCode uint) {
 	if w.code != 0 {
 		log.WarnE(2, "WriteHeader called multiple times")
@@ -438,31 +475,18 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// WriteJson serializes data to JSON and sets appropriate headers
-func (w *Writer) WriteJson(body any) error {
-	b, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	w.Headers.Add("content-type", "application/json")
-	_, err = w.Write(b)
-	return err
-}
-
-// write sends the full HTTP response
+// write sends the complete HTTP response
 func (w *Writer) write() error {
 	if w.headersSent {
 		return nil
 	}
 
-	// Build status line
 	statusLine := "HTTP/1.1 200 OK\r\n"
 	if w.code != 0 {
 		statusText := http.StatusText(int(w.code))
 		statusLine = fmt.Sprintf("HTTP/1.1 %d %s\r\n", w.code, statusText)
 	}
 
-	// Build headers
 	var headersBuilder strings.Builder
 	if len(w.body) > 0 && w.Headers.Get("content-length") == "" {
 		w.Headers.Add("content-length", strconv.Itoa(len(w.body)))
@@ -473,18 +497,15 @@ func (w *Writer) write() error {
 	}
 
 	fullHeader := statusLine + headersBuilder.String() + "\r\n"
-
-	// Write headers and body
-	_, err := w.c.Write(append([]byte(fullHeader), w.body...))
-	if err != nil {
-		return err
+	if _, err := w.c.Write(append([]byte(fullHeader), w.body...)); err != nil {
+		return fmt.Errorf("failed to write response: %w", err)
 	}
 
 	w.headersSent = true
 	return nil
 }
 
-// WriteHeaders sends headers without body
+// WriteHeaders sends headers without body (for streaming responses)
 func (w *Writer) WriteHeaders() error {
 	if w.headersSent {
 		return nil
@@ -502,49 +523,55 @@ func (w *Writer) WriteHeaders() error {
 	}
 
 	fullHeader := statusLine + headersBuilder.String() + "\r\n"
-
-	_, err := w.c.Write([]byte(fullHeader))
-	if err != nil {
-		return err
+	if _, err := w.c.Write([]byte(fullHeader)); err != nil {
+		return fmt.Errorf("failed to write headers: %w", err)
 	}
 
 	w.headersSent = true
 	return nil
 }
 
-// ReceiveFile reads file contents from request body
+// ReceiveFile reads file contents from request body and saves to specified path
+// Args:
+//   - r: Request containing file data
+//   - path: Filesystem path to save file
+// Returns:
+//   - *os.File: Opened file handle
+//   - error: Any file operation errors
 func ReceiveFile(r *Request, path string) (*os.File, error) {
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 
 	f, err := os.Create(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
 
 	if _, err := f.Write(b); err != nil {
 		f.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to write file contents: %w", err)
 	}
 
 	return f, nil
 }
 
 // ListenFiles generates directory listing HTML
+// Args:
+//   - w: Response writer
+//   - r: Original request
+//   - path: Directory path to list
+// Returns error if template execution fails
 func ListenFiles(w *Writer, r *Request, path string) error {
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	// HTML template for directory listing
 	tmpl := template.Must(template.New("files").Parse(`
-   	<html>
-	<head>
-		<title>File List</title>
-	</head>
+	<html>
+	<head><title>File List</title></head>
 	<body>
 		<h1>Files in {{.Directory}}</h1>
 		<ul>
@@ -555,7 +582,7 @@ func ListenFiles(w *Writer, r *Request, path string) error {
 		</ul>
 	</body>
 	</html>
-    `))
+	`))
 
 	data := struct {
 		Directory string
@@ -570,18 +597,30 @@ func ListenFiles(w *Writer, r *Request, path string) error {
 	return tmpl.Execute(w, data)
 }
 
-// Error sends an error response
+// Error sends an error response with specified status code
+// Args:
+//   - w: Response writer
+//   - err: Error to display
+//   - code: HTTP status code
 func Error(w *Writer, err error, code uint) {
 	w.WriteHeader(code)
 	w.Write([]byte(err.Error()))
 }
 
-// ServerStatic configures static file serving
+// ServerStatic configures static file serving for a directory
+// Args:
+//   - router: Router instance to register handlers on
+//   - basePath: URL prefix to serve files from
+//   - fsRoot: Filesystem root directory to serve files from
+//
+// Security Features:
+//   - Path traversal protection
+//   - MIME type detection
+//   - Directory listing prevention
 func ServerStatic(router *Router, basePath, fsRoot string) {
 	basePath = "/" + strings.Trim(basePath, "/")
 	fsRoot = filepath.Clean(fsRoot)
 
-	// Directory listing handler
 	router.Route(basePath, func(r *Request, w *Writer) {
 		w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
 
@@ -598,9 +637,7 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 		}
 	})
 
-	// File serving handler
 	router.Route(basePath+"/*", func(r *Request, w *Writer) {
-		// Path validation and normalization
 		urlPath := strings.TrimPrefix(r.Path, basePath)
 		decodedPath, err := url.PathUnescape(urlPath)
 		if err != nil {
@@ -611,13 +648,11 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 		filePath := filepath.Join(fsRoot, decodedPath)
 		cleanPath := filepath.Clean(filePath)
 
-		// Security check
 		if !strings.HasPrefix(cleanPath, fsRoot) {
 			w.WriteHeader(403)
 			return
 		}
 
-		// File handling
 		info, err := os.Stat(cleanPath)
 		if err != nil {
 			w.WriteHeader(404)
@@ -629,7 +664,6 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 			return
 		}
 
-		// Open and serve file
 		file, err := os.Open(cleanPath)
 		if err != nil {
 			w.WriteHeader(404)
@@ -640,7 +674,6 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 		stat, _ := file.Stat()
 		w.Headers.Add("Content-Length", strconv.FormatInt(stat.Size(), 10))
 
-		// Set MIME type
 		if mimeType := mime.TypeByExtension(filepath.Ext(cleanPath)); mimeType != "" {
 			w.Headers.Add("Content-Type", mimeType)
 		} else {
@@ -653,9 +686,7 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 			return
 		}
 
-		// Stream file contents
-		_, err = io.Copy(w.c, file)
-		if err != nil && !isClosedConnectionError(err) {
+		if _, err := io.Copy(w.c, file); err != nil && !isClosedConnectionError(err) {
 			log.Error(fmt.Errorf("error copying file: %w", err))
 		}
 	})
@@ -668,37 +699,36 @@ func isClosedConnectionError(err error) bool {
 		strings.Contains(err.Error(), "reset by peer")
 }
 
-// startDoc starts documentation server on port 7665
+// startDoc initializes documentation server
 func startDoc(r *Router) {
-	listener, err := net.Listen("tcp", "localhost:7665")
+	listener, err := net.Listen("tcp", r.docConfig.Addrs+":"+r.docConfig.Port)
 	if err != nil {
-		log.Error(err)
+		log.Error(fmt.Errorf("failed to start documentation server: %w", err))
 		return
 	}
-
+	
+	log.System("Auto Documentation enabled: http://localhost:" + r.docConfig.Port)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Error(err)
+			log.Error(fmt.Errorf("doc server accept error: %w", err))
 			return
 		}
-
 		go handleDocRequest(conn, r)
 	}
 }
 
-// handleDocRequest serves documentation HTML
+// handleDocRequest serves documentation UI
 func handleDocRequest(c net.Conn, r *Router) {
 	defer c.Close()
 
 	_, err := parserConn(c)
 	if err != nil {
-		log.Error(err)
+		log.Error(fmt.Errorf("doc request parsing failed: %w", err))
 		return
 	}
-	w := newWriter(c)
 
-	// Documentation template with JSON formatting helpers
+	w := newWriter(c)
 	tmpl := template.Must(template.New("docs").Funcs(template.FuncMap{
 		"json": func(v interface{}) string {
 			b, _ := json.MarshalIndent(v, "", "  ")
@@ -719,11 +749,13 @@ func handleDocRequest(c net.Conn, r *Router) {
 	w.WriteHeader(200)
 
 	if err := tmpl.Execute(w, data); err != nil {
-		log.Error(err)
+		log.Error(fmt.Errorf("template execution failed: %w", err))
 		return
 	}
 
-	w.write()
+	if err := w.write(); err != nil {
+		log.Error(fmt.Errorf("doc response failed: %w", err))
+	}
 }
 
 // HTML template constant omitted for brevity

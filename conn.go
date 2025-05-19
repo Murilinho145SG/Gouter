@@ -141,33 +141,33 @@ func Run(addrs string, r *Router) error {
 //   - Automatically closes connection after handling
 //   - Recovers from panics in handler functions
 func handleConn(c net.Conn, r *Router) {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Error(fmt.Errorf("panic in handler: %v", err))
-		}
-		c.Close()
-	}()
+    defer c.Close()
 
-	req, err := parserConn(c)
-	if err != nil {
-		log.Error(fmt.Errorf("request parsing failed: %w", err))
-		return
-	}
+    // Parse HTTP request
+    req, err := parserConn(c)
+    if err != nil {
+        log.Error(err)
+        return
+    }
 
-	w := newWriter(c)
-	handler := r.parseRoute(req)
-	
-	if handler != nil {
-		handler(req, w)
-	} else {
-		w.code = http.StatusNotFound
-	}
+    // Create response writer
+    w := newWriter(c)
 
-	if !w.headersSent {
-		if err := w.write(); err != nil {
-			log.Error(fmt.Errorf("response write failed: %w", err))
-		}
-	}
+    // Find matching route handler
+    handler := r.parseRoute(req)
+    if handler != nil {
+        handler(req, w)
+    } else {
+        w.code = http.StatusNotFound
+    }
+
+    // Send response if headers haven't been sent
+    if !w.headersSent {
+        err = w.write()
+        if err != nil {
+            log.Error(err)
+        }
+    }
 }
 
 // parserConn parses HTTP request from network connection
@@ -182,73 +182,80 @@ func handleConn(c net.Conn, r *Router) {
 //   - Chunked encoding support
 //   - Maximum header size enforcement
 func parserConn(c net.Conn) (*Request, error) {
-	const timeout = 10 * time.Second
-	if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, fmt.Errorf("failed to set read deadline: %w", err)
-	}
-	defer c.SetReadDeadline(time.Time{})
+    var (
+        buffer     bytes.Buffer
+        headersLen int
+    )
 
-	var buffer bytes.Buffer
-	headersLen := 0
+    // Read headers until we find the empty line separator
+    for {
+        temp := make([]byte, 4096)
+        n, err := c.Read(temp)
+        if err != nil {
+            if errors.Is(err, io.EOF) {
+                continue
+            }
+            return nil, err
+        }
 
-	for {
-		temp := make([]byte, 4096)
-		n, err := c.Read(temp)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("header read error: %w", err)
-		}
+        buffer.Write(temp[:n])
+        headersLen = buffer.Len()
 
-		buffer.Write(temp[:n])
-		headersLen = buffer.Len()
+        // Check for header termination sequence
+        if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
+            break
+        }
 
-		if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
-			break
-		}
+        // Prevent header overflow
+        if headersLen >= defaultMaxHeaderBytes {
+            return nil, errors.New("headers exceed maximum size")
+        }
+    }
 
-		if headersLen >= defaultMaxHeaderBytes {
-			return nil, errors.New("headers exceed maximum size of 1MB")
-		}
-	}
+    data := buffer.Bytes()
+    idx := bytes.Index(data, []byte("\r\n\r\n"))
+    if idx == -1 {
+        return nil, errors.New("malformed headers")
+    }
 
-	data := buffer.Bytes()
-	idx := bytes.Index(data, []byte("\r\n\r\n"))
-	if idx == -1 {
-		return nil, errors.New("malformed headers - missing CRLF separator")
-	}
+    // Split headers and body
+    headers := data[:idx]
+    bodyStart := idx + len("\r\n\r\n")
+    initialBody := data[bodyStart:]
 
-	headers := data[:idx]
-	bodyStart := idx + len("\r\n\r\n")
-	initialBody := data[bodyStart:]
+    req := newRequest()
+    if err := req.parser(headers); err != nil {
+        return nil, err
+    }
 
-	req := newRequest()
-	if err := req.parser(headers); err != nil {
-		return nil, fmt.Errorf("header parsing failed: %w", err)
-	}
+    // Check for chunked transfer encoding
+    var isChunked bool
+    if te := req.Headers.Get("transfer-encoding"); te != "" {
+        isChunked = (te == "chunked")
+    }
 
-	var isChunked bool
-	if te := req.Headers.Get("transfer-encoding"); te != "" {
-		isChunked = (te == "chunked")
-	}
+    // Create appropriate body reader
+    var bodyReader io.Reader
+    if isChunked {
+        bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
+    } else {
+        // Handle content-length based body
+        contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
+        if contentLength > 0 {
+            remaining := int64(contentLength) - int64(len(initialBody))
+            bodyReader = io.MultiReader(
+                bytes.NewReader(initialBody),
+                io.LimitReader(c, remaining),
+            )
+        } else {
+            bodyReader = bytes.NewReader(initialBody)
+        }
+    }
 
-	var bodyReader io.Reader
-	if isChunked {
-		bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
-	} else {
-		contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
-		if contentLength > 0 {
-			remaining := int64(contentLength) - int64(len(initialBody))
-			bodyReader = io.LimitReader(
-				io.MultiReader(bytes.NewReader(initialBody), c),
-				remaining,
-			)
-		} else {
-			bodyReader = bytes.NewReader(initialBody)
-		}
-	}
+    req.Body = bodyReader
+    req.RemoteAddrs = c.RemoteAddr().String()
 
-	req.Body = bodyReader
-	req.RemoteAddrs = c.RemoteAddr().String()
-	return req, nil
+    return req, nil
 }
 
 // chunkedReader handles chunked transfer encoding decoding

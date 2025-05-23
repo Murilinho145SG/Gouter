@@ -72,8 +72,8 @@ func NewRouter() *Router {
 		handlerList: make(handlerList),
 		docConfig: &Doc{
 			Active: true,
-			Port: "7665",
-			Addrs: "localhost",
+			Port:   "7665",
+			Addrs:  "localhost",
 		},
 	}
 }

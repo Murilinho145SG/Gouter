@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,7 @@ type Doc struct {
 //   - r: Initialized Router instance
 //   - certStr: Path to SSL certificate file
 //   - key: Path to private key file
+//
 // Returns:
 //   - error: Any error encountered during server startup
 //
@@ -79,7 +81,7 @@ func RunTLS(addrs string, r *Router, certStr, key string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
-	
+
 	if r.docConfig.Active {
 		go startDoc(r)
 	}
@@ -94,7 +96,7 @@ func RunTLS(addrs string, r *Router, certStr, key string) error {
 		tlsConn := tls.Server(conn, config)
 		handshakeDeadline := time.Now().Add(5 * time.Second)
 		tlsConn.SetDeadline(handshakeDeadline)
-		
+
 		if err := tlsConn.Handshake(); err != nil {
 			tlsConn.Close()
 			log.Error(fmt.Errorf("TLS handshake failed: %w", err))
@@ -110,6 +112,7 @@ func RunTLS(addrs string, r *Router, certStr, key string) error {
 // Args:
 //   - addrs: Server address to listen on (e.g., ":8080")
 //   - r: Initialized Router instance
+//
 // Returns:
 //   - error: Any error encountered during server startup
 func Run(addrs string, r *Router) error {
@@ -141,38 +144,39 @@ func Run(addrs string, r *Router) error {
 //   - Automatically closes connection after handling
 //   - Recovers from panics in handler functions
 func handleConn(c net.Conn, r *Router) {
-    defer c.Close()
+	defer c.Close()
 
-    // Parse HTTP request
-    req, err := parserConn(c)
-    if err != nil {
-        log.Error(err)
-        return
-    }
+	// Parse HTTP request
+	req, err := parserConn(c)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-    // Create response writer
-    w := newWriter(c)
+	// Create response writer
+	w := newWriter(c)
 
-    // Find matching route handler
-    handler := r.parseRoute(req)
-    if handler != nil {
-        handler(req, w)
-    } else {
-        w.code = http.StatusNotFound
-    }
+	// Find matching route handler
+	handler := r.parseRoute(req)
+	if handler != nil {
+		handler(req, w)
+	} else {
+		w.code = http.StatusNotFound
+	}
 
-    // Send response if headers haven't been sent
-    if !w.headersSent {
-        err = w.write()
-        if err != nil {
-            log.Error(err)
-        }
-    }
+	// Send response if headers haven't been sent
+	if !w.headersSent {
+		err = w.write()
+		if err != nil {
+			log.Error(err)
+		}
+	}
 }
 
 // parserConn parses HTTP request from network connection
 // Args:
 //   - c: Active network connection
+//
 // Returns:
 //   - *Request: Parsed request object
 //   - error: Any parsing errors encountered
@@ -182,80 +186,80 @@ func handleConn(c net.Conn, r *Router) {
 //   - Chunked encoding support
 //   - Maximum header size enforcement
 func parserConn(c net.Conn) (*Request, error) {
-    var (
-        buffer     bytes.Buffer
-        headersLen int
-    )
+	var (
+		buffer     bytes.Buffer
+		headersLen int
+	)
 
-    // Read headers until we find the empty line separator
-    for {
-        temp := make([]byte, 4096)
-        n, err := c.Read(temp)
-        if err != nil {
-            if errors.Is(err, io.EOF) {
-                continue
-            }
-            return nil, err
-        }
+	// Read headers until we find the empty line separator
+	for {
+		temp := make([]byte, 4096)
+		n, err := c.Read(temp)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				continue
+			}
+			return nil, err
+		}
 
-        buffer.Write(temp[:n])
-        headersLen = buffer.Len()
+		buffer.Write(temp[:n])
+		headersLen = buffer.Len()
 
-        // Check for header termination sequence
-        if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
-            break
-        }
+		// Check for header termination sequence
+		if bytes.Contains(buffer.Bytes(), []byte("\r\n\r\n")) {
+			break
+		}
 
-        // Prevent header overflow
-        if headersLen >= defaultMaxHeaderBytes {
-            return nil, errors.New("headers exceed maximum size")
-        }
-    }
+		// Prevent header overflow
+		if headersLen >= defaultMaxHeaderBytes {
+			return nil, errors.New("headers exceed maximum size")
+		}
+	}
 
-    data := buffer.Bytes()
-    idx := bytes.Index(data, []byte("\r\n\r\n"))
-    if idx == -1 {
-        return nil, errors.New("malformed headers")
-    }
+	data := buffer.Bytes()
+	idx := bytes.Index(data, []byte("\r\n\r\n"))
+	if idx == -1 {
+		return nil, errors.New("malformed headers")
+	}
 
-    // Split headers and body
-    headers := data[:idx]
-    bodyStart := idx + len("\r\n\r\n")
-    initialBody := data[bodyStart:]
+	// Split headers and body
+	headers := data[:idx]
+	bodyStart := idx + len("\r\n\r\n")
+	initialBody := data[bodyStart:]
 
-    req := newRequest()
-    if err := req.parser(headers); err != nil {
-        return nil, err
-    }
+	req := newRequest()
+	if err := req.parser(headers); err != nil {
+		return nil, err
+	}
 
-    // Check for chunked transfer encoding
-    var isChunked bool
-    if te := req.Headers.Get("transfer-encoding"); te != "" {
-        isChunked = (te == "chunked")
-    }
+	// Check for chunked transfer encoding
+	var isChunked bool
+	if te := req.Headers.Get("transfer-encoding"); te != "" {
+		isChunked = (te == "chunked")
+	}
 
-    // Create appropriate body reader
-    var bodyReader io.Reader
-    if isChunked {
-        bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
-    } else {
-        // Handle content-length based body
-        contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
-        if contentLength > 0 {
-            remaining := int64(contentLength) - int64(len(initialBody))
-            bodyReader = io.MultiReader(
-                bytes.NewReader(initialBody),
-                io.LimitReader(c, remaining),
-            )
-        } else {
-            bodyReader = bytes.NewReader(initialBody)
-        }
-    }
+	// Create appropriate body reader
+	var bodyReader io.Reader
+	if isChunked {
+		bodyReader = newChunkedReader(io.MultiReader(bytes.NewReader(initialBody), c))
+	} else {
+		// Handle content-length based body
+		contentLength, _ := strconv.Atoi(req.Headers.Get("content-length"))
+		if contentLength > 0 {
+			remaining := int64(contentLength) - int64(len(initialBody))
+			bodyReader = io.MultiReader(
+				bytes.NewReader(initialBody),
+				io.LimitReader(c, remaining),
+			)
+		} else {
+			bodyReader = bytes.NewReader(initialBody)
+		}
+	}
 
-    req.Body = bodyReader
-    req.RemoteAddrs = c.RemoteAddr().String()
+	req.Body = bodyReader
+	req.RemoteAddrs = c.RemoteAddr().String()
 
-    return req, nil
+	return req, nil
 }
 
 // chunkedReader handles chunked transfer encoding decoding
@@ -267,6 +271,7 @@ type chunkedReader struct {
 // newChunkedReader creates a new chunked encoding reader
 // Args:
 //   - r: io.Reader containing chunked data
+//
 // Returns properly initialized chunkedReader
 func newChunkedReader(r io.Reader) io.Reader {
 	return &chunkedReader{r: bufio.NewReader(r)}
@@ -351,6 +356,7 @@ func (h Headers) Add(key, value string) {
 // Get retrieves a header value by name
 // Args:
 //   - key: Header name to retrieve (case-insensitive)
+//
 // Returns header value or empty string if not found
 func (h Headers) Get(key string) string {
 	return h[strings.ToLower(key)]
@@ -366,6 +372,7 @@ func (h Params) add(key, value string) {
 // Get retrieves a path parameter value
 // Args:
 //   - key: Parameter name to retrieve
+//
 // Returns parameter value or empty string if not found
 func (h Params) Get(key string) string {
 	return h[key]
@@ -380,6 +387,7 @@ type Request struct {
 	Body        io.Reader
 	Params      Params
 	RemoteAddrs string
+	tempFiles   []*os.File
 }
 
 // newRequest creates a new initialized Request instance
@@ -393,6 +401,7 @@ func newRequest() *Request {
 // ReadJson deserializes request body into provided struct
 // Args:
 //   - v: Target struct for JSON decoding
+//
 // Returns error if decoding fails
 func (r *Request) ReadJson(v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
@@ -436,6 +445,187 @@ func (r *Request) parser(headersByte []byte) error {
 	return nil
 }
 
+type FileUpload struct {
+	File     *os.File
+	Filename string
+	r        *Request
+}
+
+func newFileUpload(file *os.File, filename string) *FileUpload {
+	return &FileUpload{
+		File:     file,
+		Filename: filename,
+	}
+}
+
+func (fu *FileUpload) Save(dir string) (*os.File, error) {
+	defer fu.r.Cleanup()
+	f, err := os.Create(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = io.Copy(f, fu.File)
+	if err != nil {
+		return nil, err
+	}
+
+	return f, nil
+}
+
+func (r *Request) parseStruct(v interface{}, headers map[string]string, content []byte) error {
+	val := reflect.ValueOf(v)
+
+	if val.Kind() != reflect.Ptr {
+		return errors.New("is need ptr")
+	}
+
+	val = val.Elem()
+	if val.Kind() != reflect.Struct {
+		return errors.New("is need struct")
+	}
+
+	for i := 0; i < val.NumField(); i++ {
+		f := val.Type().Field(i)
+		field := val.Field(i)
+
+		tag, ok := f.Tag.Lookup("gouter")
+		if !ok {
+			continue
+		}
+
+		if headers["Content-Disposition-Name"] != tag {
+			continue
+		}
+
+		if headers["Content-Disposition-Filename-gouter"] == "filename" {
+			tempFile, err := os.CreateTemp("", "upload-*.tmp")
+			if err != nil {
+				return err
+			}
+
+			if _, err := tempFile.Write(content); err != nil {
+				return err
+			}
+
+			if _, err := tempFile.Seek(0, 0); err != nil {
+				return err
+			}
+
+			if field.Type() == reflect.TypeOf((*FileUpload)(nil)) {
+				r.tempFiles = append(r.tempFiles, tempFile)
+				tmpFileU := newFileUpload(tempFile, headers["Content-Disposition-Filename"])
+				tmpFileU.r = r
+				field.Set(reflect.ValueOf(tmpFileU))
+			}
+		}
+
+		if field.Kind() == reflect.String {
+			field.SetString(string(content))
+		}
+
+	}
+
+	return nil
+}
+
+func (r *Request) Cleanup() {
+	for _, f := range r.tempFiles {
+		f.Close()
+		os.Remove(f.Name())
+	}
+}
+
+func (r *Request) ParseMultipart(v interface{}) error {
+	contentType := r.Headers.Get("Content-Type")	
+	if !strings.Contains(contentType, "multipart/form-data") {
+		return errors.New("invalid header")
+	}
+
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return err
+	}
+
+	boundary := params["boundary"]
+	if boundary == "" {
+		return errors.New("boundary not found")
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+
+	delimiter := []byte("--" + boundary)
+	parts := bytes.Split(body, delimiter)
+
+	for _, part := range parts {
+		part := bytes.Trim(part, "\r\n-")
+		if len(part) == 0 {
+			continue
+		}
+
+		sections := bytes.SplitN(part, []byte("\r\n\r\n"), 2)
+		if len(sections) < 2 {
+			continue
+		}
+
+		headerRaw, content := sections[0], sections[1]
+
+		headers := parseHeaders(headerRaw)
+		err = r.parseStruct(v, headers, content)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func parseHeaders(headersRaw []byte) map[string]string {
+	headers := make(map[string]string)
+	headersSection := bytes.SplitN(headersRaw, []byte("\r\n\r\n"), 2)[0]
+	lines := bytes.Split(headersSection, []byte("\r\n"))
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		colon := bytes.IndexByte(line, ':')
+		if colon == -1 {
+			continue
+		}
+
+		key := http.CanonicalHeaderKey(string(bytes.TrimSpace(line[:colon])))
+		value := string(bytes.TrimSpace(line[colon+1:]))
+
+		if key == "Content-Disposition" || key == "Content-Type" {
+			mainValue, params := parseHeaderWithParams(value)
+			headers[key] = mainValue
+
+			for paramName, paramValue := range params {
+				paramKey := key + "-" + http.CanonicalHeaderKey(paramName)
+				headers[paramKey] = paramValue
+
+				if paramName == "filename" {
+					headers[paramKey+"-gouter"] = "filename"
+				}
+			}
+		} else {
+			headers[key] = value
+		}
+	}
+
+	return headers
+}
+
+func parseHeaderWithParams(value string) (string, map[string]string) {
+	mainValue, params, _ := mime.ParseMediaType(value)
+	return mainValue, params
+}
+
 // Writer handles HTTP response generation
 type Writer struct {
 	code        uint
@@ -457,6 +647,7 @@ func newWriter(c net.Conn) *Writer {
 // WriteJson serializes data to JSON and sets appropriate headers
 // Args:
 //   - v: Data structure to serialize
+//
 // Returns error if serialization fails
 func (w *Writer) WriteJson(v any) error {
 	w.Headers.Add("Content-Type", "application/json")
@@ -542,6 +733,7 @@ func (w *Writer) WriteHeaders() error {
 // Args:
 //   - r: Request containing file data
 //   - path: Filesystem path to save file
+//
 // Returns:
 //   - *os.File: Opened file handle
 //   - error: Any file operation errors
@@ -569,6 +761,7 @@ func ReceiveFile(r *Request, path string) (*os.File, error) {
 //   - w: Response writer
 //   - r: Original request
 //   - path: Directory path to list
+//
 // Returns error if template execution fails
 func ListenFiles(w *Writer, r *Request, path string) error {
 	entries, err := os.ReadDir(path)
@@ -713,7 +906,7 @@ func startDoc(r *Router) {
 		log.Error(fmt.Errorf("failed to start documentation server: %w", err))
 		return
 	}
-	
+
 	log.System("Auto Documentation enabled: http://localhost:" + r.docConfig.Port)
 	for {
 		conn, err := listener.Accept()

@@ -13,14 +13,14 @@ func main() {
 		g.Route("/infos", func(r *gouter.Request, w *gouter.Writer) {
 			//Code here...
 		})
-		
+
 		/*
-		Outputs:
-			/user/features
-			/user/infos
+			Outputs:
+				/user/features
+				/user/infos
 		*/
 	})
-	
+
 	if err := gouter.Run("0.0.0.0:8080", r); err != nil {
 		panic(err)
 	}

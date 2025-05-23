@@ -445,12 +445,14 @@ func (r *Request) parser(headersByte []byte) error {
 	return nil
 }
 
+// FileUpload represents a file being uploaded via multipart/form-data
 type FileUpload struct {
-	File     *os.File
-	Filename string
-	r        *Request
+	File     *os.File  // The temporary file object
+	Filename string    // Original filename from the client
+	r        *Request  // Pointer to the parent request (used for cleanup)
 }
 
+// newFileUpload creates a new instance of FileUpload
 func newFileUpload(file *os.File, filename string) *FileUpload {
 	return &FileUpload{
 		File:     file,
@@ -458,13 +460,16 @@ func newFileUpload(file *os.File, filename string) *FileUpload {
 	}
 }
 
+// Save writes the uploaded file to a specified directory
 func (fu *FileUpload) Save(dir string) (*os.File, error) {
-	defer fu.r.Cleanup()
-	f, err := os.Create(dir)
+	defer fu.r.Cleanup() // Clean up temporary files when done
+
+	f, err := os.Create(dir) // Create the destination file
 	if err != nil {
 		return nil, err
 	}
 
+	// Copy the contents of the uploaded file to the destination
 	_, err = io.Copy(f, fu.File)
 	if err != nil {
 		return nil, err
@@ -473,9 +478,11 @@ func (fu *FileUpload) Save(dir string) (*os.File, error) {
 	return f, nil
 }
 
+// parseStruct parses form-data content into a given struct
 func (r *Request) parseStruct(v interface{}, headers map[string]string, content []byte) error {
 	val := reflect.ValueOf(v)
 
+	// Ensure v is a pointer to a struct
 	if val.Kind() != reflect.Ptr {
 		return errors.New("is need ptr")
 	}
@@ -485,19 +492,23 @@ func (r *Request) parseStruct(v interface{}, headers map[string]string, content 
 		return errors.New("is need struct")
 	}
 
+	// Loop through the struct fields to match the form-data tag
 	for i := 0; i < val.NumField(); i++ {
 		f := val.Type().Field(i)
 		field := val.Field(i)
 
+		// Check if the field has a `gouter` tag
 		tag, ok := f.Tag.Lookup("gouter")
 		if !ok {
 			continue
 		}
 
+		// Skip if tag does not match Content-Disposition name
 		if headers["Content-Disposition-Name"] != tag {
 			continue
 		}
 
+		// If it's a file (with a filename), handle file upload
 		if headers["Content-Disposition-Filename-gouter"] == "filename" {
 			tempFile, err := os.CreateTemp("", "upload-*.tmp")
 			if err != nil {
@@ -512,6 +523,7 @@ func (r *Request) parseStruct(v interface{}, headers map[string]string, content 
 				return err
 			}
 
+			// Assign the file to the struct field if it's a FileUpload type
 			if field.Type() == reflect.TypeOf((*FileUpload)(nil)) {
 				r.tempFiles = append(r.tempFiles, tempFile)
 				tmpFileU := newFileUpload(tempFile, headers["Content-Disposition-Filename"])
@@ -520,15 +532,16 @@ func (r *Request) parseStruct(v interface{}, headers map[string]string, content 
 			}
 		}
 
+		// Set string content directly if field is of string type
 		if field.Kind() == reflect.String {
 			field.SetString(string(content))
 		}
-
 	}
 
 	return nil
 }
 
+// Cleanup removes all temporary uploaded files
 func (r *Request) Cleanup() {
 	for _, f := range r.tempFiles {
 		f.Close()
@@ -536,12 +549,14 @@ func (r *Request) Cleanup() {
 	}
 }
 
+// ParseMultipart processes a multipart/form-data body and populates the provided struct
 func (r *Request) ParseMultipart(v interface{}) error {
-	contentType := r.Headers.Get("Content-Type")	
+	contentType := r.Headers.Get("Content-Type")
 	if !strings.Contains(contentType, "multipart/form-data") {
 		return errors.New("invalid header")
 	}
 
+	// Parse boundary parameter from Content-Type header
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return err
@@ -552,11 +567,13 @@ func (r *Request) ParseMultipart(v interface{}) error {
 		return errors.New("boundary not found")
 	}
 
+	// Read full body content
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
 	}
 
+	// Split body using boundary
 	delimiter := []byte("--" + boundary)
 	parts := bytes.Split(body, delimiter)
 
@@ -566,6 +583,7 @@ func (r *Request) ParseMultipart(v interface{}) error {
 			continue
 		}
 
+		// Separate headers from content
 		sections := bytes.SplitN(part, []byte("\r\n\r\n"), 2)
 		if len(sections) < 2 {
 			continue
@@ -573,6 +591,7 @@ func (r *Request) ParseMultipart(v interface{}) error {
 
 		headerRaw, content := sections[0], sections[1]
 
+		// Parse headers and bind content to the struct
 		headers := parseHeaders(headerRaw)
 		err = r.parseStruct(v, headers, content)
 		if err != nil {
@@ -583,6 +602,7 @@ func (r *Request) ParseMultipart(v interface{}) error {
 	return nil
 }
 
+// parseHeaders parses raw header bytes into a map
 func parseHeaders(headersRaw []byte) map[string]string {
 	headers := make(map[string]string)
 	headersSection := bytes.SplitN(headersRaw, []byte("\r\n\r\n"), 2)[0]
@@ -601,6 +621,7 @@ func parseHeaders(headersRaw []byte) map[string]string {
 		key := http.CanonicalHeaderKey(string(bytes.TrimSpace(line[:colon])))
 		value := string(bytes.TrimSpace(line[colon+1:]))
 
+		// Parse Content-Disposition or Content-Type with parameters
 		if key == "Content-Disposition" || key == "Content-Type" {
 			mainValue, params := parseHeaderWithParams(value)
 			headers[key] = mainValue
@@ -609,6 +630,7 @@ func parseHeaders(headersRaw []byte) map[string]string {
 				paramKey := key + "-" + http.CanonicalHeaderKey(paramName)
 				headers[paramKey] = paramValue
 
+				// Special marker for filename detection
 				if paramName == "filename" {
 					headers[paramKey+"-gouter"] = "filename"
 				}
@@ -621,10 +643,12 @@ func parseHeaders(headersRaw []byte) map[string]string {
 	return headers
 }
 
+// parseHeaderWithParams parses a header value and extracts parameters
 func parseHeaderWithParams(value string) (string, map[string]string) {
 	mainValue, params, _ := mime.ParseMediaType(value)
 	return mainValue, params
 }
+
 
 // Writer handles HTTP response generation
 type Writer struct {

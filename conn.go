@@ -157,7 +157,8 @@ func handleConn(c net.Conn, r *Router) {
 	w := newWriter(c)
 
 	// Find matching route handler
-	handler := r.parseRoute(req)
+	handler, basePath := r.parseRoute(req)
+	req.basePath = basePath
 	if handler != nil {
 		handler(req, w)
 	} else {
@@ -381,7 +382,8 @@ func (h Params) Get(key string) string {
 // Request represents an HTTP request
 type Request struct {
 	Method      string
-	Path        string
+	path        string
+	basePath    string
 	Headers     Headers
 	Version     string
 	Body        io.Reader
@@ -390,12 +392,35 @@ type Request struct {
 	tempFiles   []*os.File
 }
 
+type Path struct {
+	basePath, reqPath string
+}
+
 // newRequest creates a new initialized Request instance
 func newRequest() *Request {
 	return &Request{
 		Headers: make(Headers),
 		Params:  make(Params),
 	}
+}
+
+func (r *Request) Path() *Path {
+	return &Path{
+		basePath: r.basePath,
+		reqPath:  r.path,
+	}
+}
+
+func (p *Path) GetPath() string {
+	return p.reqPath
+}
+
+func (p *Path) GetBasePath() string {
+	return p.basePath
+}
+
+func (p *Path) GetDifPath() string {
+	return strings.TrimPrefix(p.reqPath, p.basePath)
 }
 
 // ReadJson deserializes request body into provided struct
@@ -420,7 +445,7 @@ func (r *Request) parser(headersByte []byte) error {
 	}
 
 	r.Method = string(titleParts[0])
-	r.Path = strings.TrimSpace(string(titleParts[1]))
+	r.path = strings.TrimSpace(string(titleParts[1]))
 	r.Version = string(titleParts[2])
 
 	for i := 1; i < len(lines); i++ {
@@ -447,9 +472,9 @@ func (r *Request) parser(headersByte []byte) error {
 
 // FileUpload represents a file being uploaded via multipart/form-data
 type FileUpload struct {
-	File     *os.File  // The temporary file object
-	Filename string    // Original filename from the client
-	r        *Request  // Pointer to the parent request (used for cleanup)
+	File     *os.File // The temporary file object
+	Filename string   // Original filename from the client
+	r        *Request // Pointer to the parent request (used for cleanup)
 }
 
 // newFileUpload creates a new instance of FileUpload
@@ -649,7 +674,6 @@ func parseHeaderWithParams(value string) (string, map[string]string) {
 	return mainValue, params
 }
 
-
 // Writer handles HTTP response generation
 type Writer struct {
 	code        uint
@@ -788,34 +812,80 @@ func ReceiveFile(r *Request, path string) (*os.File, error) {
 //
 // Returns error if template execution fails
 func ListenFiles(w *Writer, r *Request, path string) error {
+	w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(200)
+		return nil
+	}
+
+	if r.Method != "GET" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return errors.New("method not allowed")
+	}
+
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Errorf("failed to read directory: %w", err)
 	}
 
-	tmpl := template.Must(template.New("files").Parse(`
-	<html>
-	<head><title>File List</title></head>
-	<body>
-		<h1>Files in {{.Directory}}</h1>
-		<ul>
-			<li><a href="../">../</a></li>
-			{{range .Files}}
-			<li><a href="{{$.BasePath}}/{{.Name}}{{if .IsDir}}/{{end}}">{{.Name}}{{if .IsDir}}/{{end}}</a></li>
-			{{end}}
-		</ul>
-	</body>
-	</html>
-	`))
+	tmpl := template.Must(template.New("files").Funcs(template.FuncMap{
+		"IsDir": func(e os.DirEntry) bool { return e.IsDir() },
+	}).Parse(`
+    <html>
+    <head><title>File List</title></head>
+    <body>
+        <h1>Files in {{.Directory}}</h1>
+        <ul>
+            {{range .Files}}
+            <li>
+                <a href="{{$.BasePath}}/{{.Name}}">
+                    {{.Name}}{{if .IsDir}}/{{end}}
+                </a>
+            </li>
+            {{end}}
+        </ul>
+    </body>
+    </html>
+    `))
+
+	if r.Path().reqPath != r.Path().basePath {
+		idx := strings.LastIndex(r.Path().GetPath(), "/")
+		if idx != -1 {
+			before := r.Path().GetPath()[:idx]
+
+			tmpl = template.Must(template.New("files").Funcs(template.FuncMap{
+				"IsDir": func(e os.DirEntry) bool { return e.IsDir() },
+			}).Parse(`
+			    <html>
+			    <head><title>File List</title></head>
+			    <body>
+			        <h1>Files in {{.Directory}}</h1>
+			        <ul>
+			            <li><a href="` + before + `">../</a></li>
+			            {{range .Files}}
+			            <li>
+			                <a href="{{$.ParentPath}}/{{.Name}}">
+			                    {{.Name}}{{if .IsDir}}/{{end}}
+			                </a>
+			            </li>
+			            {{end}}
+			        </ul>
+			    </body>
+			    </html>
+	    `))
+		}
+	}
 
 	data := struct {
-		Directory string
-		Files     []os.DirEntry
-		BasePath  string
+		Directory  string
+		Files      []os.DirEntry
+		BasePath   string
+		ParentPath string
 	}{
-		Directory: path,
-		Files:     entries,
-		BasePath:  strings.TrimSuffix(r.Path, "/"),
+		Directory:  path,
+		Files:      entries,
+		BasePath:   r.basePath,
+		ParentPath: r.path,
 	}
 
 	return tmpl.Execute(w, data)
@@ -833,6 +903,75 @@ func Error(w *Writer, err error, code uint) {
 
 // ServerStatic configures static file serving for a directory
 // Args:
+//   - Request: Request for this route
+//	 - Writer: Writer for write the req
+//   - fsRoot: Filesystem root directory to serve files from
+//
+// Security Features:
+//   - Path traversal protection
+//   - MIME type detection
+//   - Directory listing prevention
+func ServerFiles(r *Request, w *Writer, fsRoot string) {
+	w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(200)
+		return
+	}
+
+	if r.Method != "GET" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	decodedPath, err := url.PathUnescape(r.Path().GetDifPath())
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
+
+	filePath := filepath.Join(fsRoot, decodedPath)
+	cleanPath := filepath.Clean(filePath)
+
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+
+	if info.IsDir() {
+		ListenFiles(w, r, cleanPath)
+		return
+	}
+
+	file, err := os.Open(cleanPath)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+	defer file.Close()
+
+	stat, _ := file.Stat()
+	w.Headers.Add("Content-Length", strconv.FormatInt(stat.Size(), 10))
+
+	if mimeType := mime.TypeByExtension(filepath.Ext(cleanPath)); mimeType != "" {
+		w.Headers.Add("Content-Type", mimeType)
+	} else {
+		w.Headers.Add("Content-Type", "application/octet-stream")
+	}
+
+	w.WriteHeader(200)
+	if err := w.WriteHeaders(); err != nil {
+		log.Error(err)
+		return
+	}
+
+	if _, err := io.Copy(w.c, file); err != nil && !isClosedConnectionError(err) {
+		log.Error(fmt.Errorf("error copying file: %w", err))
+	}
+}
+
+// ServerStatic configures static file serving for a directory
+// Args:
 //   - router: Router instance to register handlers on
 //   - basePath: URL prefix to serve files from
 //   - fsRoot: Filesystem root directory to serve files from
@@ -845,25 +984,19 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 	basePath = "/" + strings.Trim(basePath, "/")
 	fsRoot = filepath.Clean(fsRoot)
 
-	router.Route(basePath, func(r *Request, w *Writer) {
-		w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
-
-		switch r.Method {
-		case "OPTIONS":
-			w.WriteHeader(200)
-		case "GET":
-			w.Headers.Add("Content-Type", "text/html; charset=utf-8")
-			if err := ListenFiles(w, r, fsRoot); err != nil {
-				Error(w, errors.New("directory listing failed"), 500)
-			}
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-
 	router.Route(basePath+"/*", func(r *Request, w *Writer) {
-		urlPath := strings.TrimPrefix(r.Path, basePath)
-		decodedPath, err := url.PathUnescape(urlPath)
+		w.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(200)
+			return
+		}
+
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		decodedPath, err := url.PathUnescape(r.Path().GetDifPath())
 		if err != nil {
 			w.WriteHeader(400)
 			return
@@ -871,11 +1004,6 @@ func ServerStatic(router *Router, basePath, fsRoot string) {
 
 		filePath := filepath.Join(fsRoot, decodedPath)
 		cleanPath := filepath.Clean(filePath)
-
-		if !strings.HasPrefix(cleanPath, fsRoot) {
-			w.WriteHeader(403)
-			return
-		}
 
 		info, err := os.Stat(cleanPath)
 		if err != nil {

@@ -85,16 +85,16 @@ func (r *Router) Update(callback func(d *Doc)) {
 
 // parseRoute matches incoming requests to registered routes
 // Returns the appropriate handler or nil if no match found
-func (r *Router) parseRoute(req *Request) Handler {
+func (r *Router) parseRoute(req *Request) (Handler, string) {
 	if req == nil {
-		return nil
+		return nil, ""
 	}
 
 	routes := r.handlerList
 
 	// Check for exact match
-	if err := routes.hasRoute(req.Path); err == nil {
-		return routes.getHandler(req.Path)
+	if err := routes.hasRoute(req.Path().reqPath); err == nil {
+		return routes.getHandler(req.Path().reqPath), req.Path().reqPath
 	}
 
 	var originalPath string
@@ -104,13 +104,13 @@ func (r *Router) parseRoute(req *Request) Handler {
 		// Handle wildcard routes (e.g., /static/*)
 		if strings.HasSuffix(k, "/*") {
 			baseRoute := strings.TrimSuffix(k, "/*")
-			if strings.HasPrefix(req.Path, baseRoute+"/") {
-				return routes.getHandler(k)
+			if strings.HasPrefix(req.Path().reqPath, baseRoute) {
+				return routes.getHandler(k), baseRoute
 			}
 		}
 
 		// Split path segments for parameter matching
-		partsReq := strings.Split(strings.Trim(req.Path, "/"), "/")
+		partsReq := strings.Split(strings.Trim(req.Path().reqPath, "/"), "/")
 		parts := strings.Split(strings.Trim(k, "/"), "/")
 
 		if len(parts) != len(partsReq) {
@@ -146,7 +146,7 @@ func (r *Router) parseRoute(req *Request) Handler {
 		}
 	}
 
-	return routes.getHandler(originalPath)
+	return routes.getHandler(originalPath), originalPath
 }
 
 // Route registers a new handler for a specific path

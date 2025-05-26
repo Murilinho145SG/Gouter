@@ -168,7 +168,7 @@ func handleConn(c net.Conn, r *Router) {
 	// Send response if headers haven't been sent
 	if !w.headersSent {
 		err = w.write()
-		if err != nil {
+		if err != nil && errors.Is(err, net.ErrWriteToConnected) {
 			log.Error(err)
 		}
 	}
